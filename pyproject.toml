@@ -3,7 +3,7 @@ name = "enochecker-cli"
 version = "0.1.1"
 description = "Enochecker CLI"
 authors = [
-	{ name = "Louis Burad", email = "dev@sinitax.com" },
+	{ name = "Louis Burda", email = "dev@sinitax.com" },
 	{ name = "Benedikt Radtke", email = "benediktradtke@gmail.com" }
 ]
 requires-python = ">=3.9"
