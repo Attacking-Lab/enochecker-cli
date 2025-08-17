@@ -1,0 +1,60 @@
+[project]
+name = "enochecker-cli"
+version = "0.1.1"
+description = "Enochecker CLI"
+authors = [
+	{ name = "Louis Burad", email = "dev@sinitax.com" },
+	{ name = "Benedikt Radtke", email = "benediktradtke@gmail.com" }
+]
+requires-python = ">=3.9"
+dependencies = [
+	"enochecker-core==0.10.0",
+	"jsons>=1.0.0",
+	"requests>=2.20",
+]
+classifiers = [
+	"Development Status :: 4 - Beta",
+	"Programming Language :: Python :: 3.9",
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12",
+	"Programming Language :: Python :: 3.13",
+	"Operating System :: OS Independent",
+]
+
+[project.urls]
+repository = "https://github.com/attacking-lab/enochecker_cli"
+homepage = "https://github.com/attacking-lab/enochecker_cli"
+
+[project.scripts]
+enochecker_cli = "enochecker_cli.base:main"
+
+[dependency-groups]
+dev = [
+	"types-requests==2.31.0.1",
+	"types-urllib3==1.26.25.13",
+	"typing-extensions==4.6.3",
+]
+format = [
+	"ruff>=0.12.9",
+]
+lint = [
+	"ruff>=0.12.9",
+]
+test = [
+	"coverage>=7.10.4",
+	"pytest>=8.4.1",
+]
+typing = [
+	"mypy>=1.17.1",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["enochecker_cli"]
+exclude = []
+

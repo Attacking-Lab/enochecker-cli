@@ -53,7 +53,27 @@ def test_json_checker_message():
 
 
 def test_json_checker_message_no_flag():
-    argv = ["havoc", "-i", "18", "-a", "example", "-T", "20", "-t", "TestTeam", "-r", "4", "-R", "3", "-v", "5", "-x", "16000", "-l", "51000"]
+    argv = [
+        "havoc",
+        "-i",
+        "18",
+        "-a",
+        "example",
+        "-T",
+        "20",
+        "-t",
+        "TestTeam",
+        "-r",
+        "4",
+        "-R",
+        "3",
+        "-v",
+        "5",
+        "-x",
+        "16000",
+        "-l",
+        "51000",
+    ]
 
     parser = argparse.ArgumentParser(description="Your friendly checker script")
     add_arguments(parser)
