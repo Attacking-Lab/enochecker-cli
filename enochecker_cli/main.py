@@ -565,9 +565,7 @@ def main() -> None:
     raw_parser = commands_group.add_parser(
         "raw", help="build and dispatch a single raw checker task"
     )
-    run_parser = commands_group.add_parser(
-        "run", help="run checker task chains"
-    )
+    run_parser = commands_group.add_parser("run", help="run checker task chains")
     sim_parser = commands_group.add_parser("sim", help="simulate checker load")
 
     raw_parser.add_argument(
@@ -598,7 +596,7 @@ def main() -> None:
         "--related-round-id",
         type=int,
         default=1,
-        help="id of the round in which database info was stored"
+        help="id of the round in which database info was stored",
     )
     raw_parser.add_argument(
         "--flag",
@@ -662,10 +660,7 @@ def main() -> None:
         help="multiplier for non-exploit traffic",
     )
     sim_parser.add_argument(
-        "--rounds",
-        type=int,
-        default=1000,
-        help="number of rounds to simulate"
+        "--rounds", type=int, default=1000, help="number of rounds to simulate"
     )
     sim_parser.add_argument(
         "--statistics",
