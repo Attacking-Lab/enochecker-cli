@@ -2,47 +2,105 @@
 
 
 ## Usage
+
 ```
-usage: enochecker_cli [-h] [-A CHECKER_ADDRESS] [-i TASK_ID] [-a ADDRESS] [-T TEAM_ID] [-t TEAM_NAME] [-r CURRENT_ROUND_ID] [-R RELATED_ROUND_ID] [-f FLAG] [-v VARIANT_ID] [-x TIMEOUT] [-l ROUND_LENGTH] [-I TASK_CHAIN_ID]
-                      [--flag_regex FLAG_REGEX] [--attack_info ATTACK_INFO]
-                      {putflag,getflag,putnoise,getnoise,havoc,exploit}
+usage: enochecker_cli [-h] [-a CHECKER_ADDRESS] [-p {1..65535}]
+                      [-A SERVICE_ADDRESS] [--flag-regex FLAG_REGEX]
+                      [--timeout TIMEOUT]
+                      {raw,run,sim} ...
 
 Your friendly checker script
 
+options:
+  -h, --help            show this help message and exit
+  -a CHECKER_ADDRESS, --checker-address CHECKER_ADDRESS
+                        The address on which checker is listening
+  -p {1..65535}, --checker-port {1..65535}
+                        The port on which the checker is listening
+  -A SERVICE_ADDRESS, --service-address SERVICE_ADDRESS
+                        The ip or address of the remote team to check
+  --flag-regex FLAG_REGEX
+  --timeout TIMEOUT     Number of seconds to wait until a checker tasks
+                        complete
+
+Commands:
+  {raw,run,sim}
+    raw                 Build and dispatch a single raw checker task
+    run                 Run (multiple) checker task chains
+    sim                 Simulate checker load
+```
+
+```
+usage: enochecker_cli raw [-h] [--task-id TASK_ID] [--team-id TEAM_ID]
+                          [--team-name TEAM_NAME]
+                          [--current-round-id CURRENT_ROUND_ID]
+                          [--related-round-id RELATED_ROUND_ID] [--flag FLAG]
+                          [--variant-id VARIANT_ID]
+                          [--round-length ROUND_LENGTH]
+                          [--task-chain-id TASK_CHAIN_ID]
+                          [--attack-info ATTACK_INFO]
+                          {putflag,getflag,putnoise,getnoise,havoc,exploit}
+
 positional arguments:
   {putflag,getflag,putnoise,getnoise,havoc,exploit}
-                        One of ['putflag', 'getflag', 'putnoise', 'getnoise', 'havoc', 'exploit']
+                        One of: putflag, getflag, putnoise, getnoise, havoc,
+                        exploit
 
 options:
   -h, --help            show this help message and exit
-  -A CHECKER_ADDRESS, --checker_address CHECKER_ADDRESS
-                        The URL of the checker
-  -i TASK_ID, --task_id TASK_ID
-                        An id for this task. Must be unique in a CTF.
-  -a ADDRESS, --address ADDRESS
-                        The ip or address of the remote team to check
-  -T TEAM_ID, --team_id TEAM_ID
-                        The Team_id belonging to the specified Team
-  -t TEAM_NAME, --team_name TEAM_NAME
+  --task-id TASK_ID     An unique id for this task.
+  --team-id TEAM_ID     The Team_id belonging to the specified Team
+  --team-name TEAM_NAME
                         The name of the target team to check
-  -r CURRENT_ROUND_ID, --current_round_id CURRENT_ROUND_ID
+  --current-round-id CURRENT_ROUND_ID
                         The round we are in right now
-  -R RELATED_ROUND_ID, --related_round_id RELATED_ROUND_ID
-                        The round in which the flag or noise was stored when method is getflag/getnoise. Equal to current_round_id otherwise.
-  -f FLAG, --flag FLAG  The flag for putflag/getflag or the flag to find in exploit mode
-  -v VARIANT_ID, --variant_id VARIANT_ID
+  --related-round-id RELATED_ROUND_ID
+                        The round in which the flag or noise was stored when
+                        method is getflag/getnoise. Equal to current_round_id
+                        otherwise.
+  --flag FLAG           The flag for putflag/getflag or the flag to find in
+                        exploit mode
+  --variant-id VARIANT_ID
                         The variantId for the method being called
-  -x TIMEOUT, --timeout TIMEOUT
-                        The maximum amount of time the script has to execute in milliseconds (default 30 000)
-  -l ROUND_LENGTH, --round_length ROUND_LENGTH
+  --round-length ROUND_LENGTH
                         The round length in milliseconds (default 300 000)
-  -I TASK_CHAIN_ID, --task_chain_id TASK_CHAIN_ID
-                        A unique Id which must be identical for all related putflag/getflag calls and putnoise/getnoise calls
-  --flag_regex FLAG_REGEX
-                        A regular expression matched by the flag, used only when running the exploit method
-  --attack_info ATTACK_INFO
-                        The attack info returned by the corresponding putflag, used only when running the exploit method
+  --task-chain-id TASK_CHAIN_ID
+                        A unique Id which must be identical for all related
+                        putflag/getflag calls and putnoise/getnoise calls
+  --attack-info ATTACK_INFO
+                        The attack info returned by the corresponding putflag,
+                        used only when running the exploit method
+```
+
+```
+usage: enochecker_cli run [-h] [-m MULTIPLY] [--loop] targets [targets ...]
+
+positional arguments:
+  targets               One of: putflag, putflag-N, getflag, getflag-N,
+                        putnoise, putnoise-N, getnoise, getnoise-N, havoc,
+                        havoc-N, exploit, exploit-N, all
+
+options:
+  -h, --help            show this help message and exit
+  -m MULTIPLY, --multiply MULTIPLY
+                        Number of chain copies to run concurrently
+  --loop                Run continuously
+```
+
+```
+usage: enochecker_cli sim [-h] [--exploiters EXPLOITERS] [-m FACTOR]
+                          [--rounds ROUNDS] [--statistics PATH]
+
+options:
+  -h, --help            show this help message and exit
+  --exploiters EXPLOITERS
+                        The number of exploiters to simulate
+  -m FACTOR, --multiply FACTOR
+                        Multiplier for non-exploit traffic
+  --rounds ROUNDS       The number of rounds to simulate
+  --statistics PATH     Collect statistics into this file
 ```
 
 ## Installation
-`pip3 install enochecker_cli`
+
+`pip3 install git+ssh://git@github.com/attacking-lab/enochecker-cli`
