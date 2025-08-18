@@ -1,20 +1,24 @@
 [project]
 name = "enochecker-cli"
-version = "0.1.1"
+version = "1.0.0"
 description = "Enochecker CLI"
 authors = [
 	{ name = "Louis Burda", email = "dev@sinitax.com" },
+	{ name = "Tobias Holl", email = "tobias@tholl.xyz" },
 	{ name = "Benedikt Radtke", email = "benediktradtke@gmail.com" }
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
+	"dotenv>=0.9.9",
 	"enochecker-core==0.10.0",
+	"exrex>=0.12.0",
+	"httpx>=0.28.1",
 	"jsons>=1.0.0",
 	"requests>=2.20",
+	"rich>=14.1.0",
 ]
 classifiers = [
 	"Development Status :: 4 - Beta",
-	"Programming Language :: Python :: 3.9",
 	"Programming Language :: Python :: 3.10",
 	"Programming Language :: Python :: 3.11",
 	"Programming Language :: Python :: 3.12",
@@ -27,7 +31,7 @@ repository = "https://github.com/attacking-lab/enochecker_cli"
 homepage = "https://github.com/attacking-lab/enochecker_cli"
 
 [project.scripts]
-enochecker_cli = "enochecker_cli.base:main"
+enochecker_cli = "enochecker_cli.main:main"
 
 [dependency-groups]
 dev = [
@@ -58,3 +62,16 @@ where = ["."]
 include = ["enochecker_cli"]
 exclude = []
 
+[tool.mypy]
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = "jsons"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "exrex"
+ignore_missing_imports = true
