@@ -530,7 +530,7 @@ def main() -> None:
         "--checker-address",
         type=str,
         default=checker_address,
-        help="The address on which checker is listening",
+        help="address on which checker is listening",
     )
 
     checker_port = int(os.environ.get("ENOCHECKER_CHECKER_PORT") or "-1")
@@ -540,7 +540,7 @@ def main() -> None:
         type=int,
         default=checker_port,
         metavar="{1..65535}",
-        help="The port on which the checker is listening",
+        help="port on which the checker is listening",
     )
 
     service_address = os.environ.get("ENOCHECKER_SERVICE_ADDRESS") or ""
@@ -549,7 +549,7 @@ def main() -> None:
         "--service-address",
         type=str,
         default=service_address,
-        help="The ip or address of the remote team to check",
+        help="address at which service is reachable by checker",
     )
 
     parser.add_argument("--flag-regex", type=str, default=r"ENO[a-zA-Z0-9+/]{48}")
@@ -558,80 +558,80 @@ def main() -> None:
         "--timeout",
         type=int,
         default=60,
-        help="Number of seconds to wait until a checker tasks complete",
+        help="number of seconds to wait until a checker tasks complete",
     )
 
     commands_group = parser.add_subparsers(dest="command", title="Commands")
     raw_parser = commands_group.add_parser(
-        "raw", help="Build and dispatch a single raw checker task"
+        "raw", help="build and dispatch a single raw checker task"
     )
     run_parser = commands_group.add_parser(
-        "run", help="Run (multiple) checker task chains"
+        "run", help="run checker task chains"
     )
-    sim_parser = commands_group.add_parser("sim", help="Simulate checker load")
+    sim_parser = commands_group.add_parser("sim", help="simulate checker load")
 
     raw_parser.add_argument(
         "--task-id",
         type=int,
         default=1,
-        help="An unique id for this task.",
+        help="unique id for task",
     )
     raw_parser.add_argument(
         "--team-id",
         type=int,
         default=1,
-        help="The Team_id belonging to the specified Team",
+        help="id of the target team",
     )
     raw_parser.add_argument(
         "--team-name",
         type=str,
         default="team1",
-        help="The name of the target team to check",
+        help="name of the target team",
     )
     raw_parser.add_argument(
         "--current-round-id",
         type=int,
         default=1,
-        help="The round we are in right now",
+        help="id of the current round",
     )
     raw_parser.add_argument(
         "--related-round-id",
         type=int,
         default=1,
-        help="The round in which the flag or noise was stored when method is getflag/getnoise. Equal to current_round_id otherwise.",
+        help="id of the round in which database info was stored"
     )
     raw_parser.add_argument(
         "--flag",
         type=str,
         default="ENOFLAGENOFLAG=",
-        help="The flag for putflag/getflag or the flag to find in exploit mode",
+        help="flag for putflag/getflag or flag to find in exploit mode",
     )
     raw_parser.add_argument(
         "--variant-id",
         type=int,
         default=0,
-        help="The variantId for the method being called",
+        help="variantId for the method being called",
     )
     raw_parser.add_argument(
         "--round-length",
         type=int,
         default=300000,
-        help="The round length in milliseconds (default 300 000)",
+        help="round length in milliseconds (default 300 000)",
     )
     raw_parser.add_argument(
         "--task-chain-id",
         type=str,
         default=None,
-        help="A unique Id which must be identical for all related putflag/getflag calls and putnoise/getnoise calls",
+        help="unique id which must be identical for all related putflag/getflag calls and putnoise/getnoise calls",
     )
     raw_parser.add_argument(
         "--attack-info",
         type=str,
         default=None,
-        help="The attack info returned by the corresponding putflag, used only when running the exploit method",
+        help="attack info returned by the corresponding putflag, used only when running the exploit method",
     )
     raw_parser.add_argument(
-        "method", choices=TASK_TYPES, help="One of: {}".format(", ".join(TASK_TYPES))
+        "method", choices=TASK_TYPES, help="one of: {}".format(", ".join(TASK_TYPES))
     )
 
     run_parser.add_argument(
@@ -639,19 +639,19 @@ def main() -> None:
         "--multiply",
         type=int,
         default=1,
-        help="Number of chain copies to run concurrently",
+        help="number of chain copies to run concurrently",
     )
-    run_parser.add_argument("--loop", action="store_true", help="Run continuously")
+    run_parser.add_argument("--loop", action="store_true", help="run continuously")
     targets = sum([[t, f"{t}-N"] for t in TASK_TYPES], []) + ["all"]
     run_parser.add_argument(
-        "targets", nargs="+", help="One of: {}".format(", ".join(targets))
+        "targets", nargs="+", help="one of: {}".format(", ".join(targets))
     )
 
     sim_parser.add_argument(
         "--exploiters",
         type=int,
         default=50,
-        help="The number of exploiters to simulate",
+        help="number of exploiters to simulate",
     )
     sim_parser.add_argument(
         "-m",
@@ -659,15 +659,18 @@ def main() -> None:
         type=int,
         default=1,
         metavar="FACTOR",
-        help="Multiplier for non-exploit traffic",
+        help="multiplier for non-exploit traffic",
     )
     sim_parser.add_argument(
-        "--rounds", type=int, default=1000, help="The number of rounds to simulate"
+        "--rounds",
+        type=int,
+        default=1000,
+        help="number of rounds to simulate"
     )
     sim_parser.add_argument(
         "--statistics",
         metavar="PATH",
-        help="Collect statistics into this file",
+        help="collect statistics into this file",
         type=pathlib.Path,
     )
 
