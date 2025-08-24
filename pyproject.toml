@@ -1,6 +1,6 @@
 [project]
 name = "enochecker-cli"
-version = "1.0.0"
+version = "1.0.1"
 description = "Enochecker CLI"
 authors = [
 	{ name = "Louis Burda", email = "dev@sinitax.com" },

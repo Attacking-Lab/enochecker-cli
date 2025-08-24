@@ -524,7 +524,7 @@ def main() -> None:
         description="Your friendly checker script", allow_abbrev=True
     )
 
-    checker_address = os.environ.get("ENOCHECKER_CHECKER_ADDRESS") or ""
+    checker_address = os.environ.get("ENOCHECKER_CHECKER_ADDRESS") or "localhost"
     parser.add_argument(
         "-a",
         "--checker-address",
@@ -673,8 +673,6 @@ def main() -> None:
 
     if args.service_address == "":
         raise ValueError("Specify service address via -A or ENOCHECKER_SERVICE_ADDRESS")
-    if args.checker_address == "":
-        raise ValueError("Specify checker address via -a or ENOCHECKER_CHECKER_ADDRESS")
     if args.checker_port == -1:
         raise ValueError("Specify checker port via -p or ENOCHECKER_CHECKER_PORT")
 
