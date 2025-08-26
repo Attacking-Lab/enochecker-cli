@@ -354,6 +354,7 @@ async def run_chain(
     loop: bool,
     targets: list[str],
     timeout: int,
+    auto: bool,
 ):
     url = f"http://{checker_address}:{checker_port}"
     async with CheckerClient(url, service_address, None, flag_regex, timeout) as client:
@@ -397,14 +398,14 @@ async def run_chain(
             if method_name == "putflag":
                 method = (client.putflag, variant_id)
             elif method_name == "getflag":
-                if ("putflag", variant_id) not in used_targets:
+                if auto and ("putflag", variant_id) not in used_targets:
                     targets.append(f"putflag-{variant_id}")
                     continue
                 method = (client.getflag, variant_id)
             elif method_name == "putnoise":
                 method = (client.putnoise, variant_id)
             elif method_name == "getnoise":
-                if ("putnoise", variant_id) not in used_targets:
+                if auto and ("putnoise", variant_id) not in used_targets:
                     targets.append(f"putnoise-{variant_id}")
                     continue
                 method = (client.getnoise, variant_id)
@@ -413,7 +414,7 @@ async def run_chain(
             elif method_name == "exploit":
                 retry = False
                 for flag_variant in reversed(range(client.flag_variants)):
-                    if ("putflag", flag_variant) not in used_targets:
+                    if auto and ("putflag", flag_variant) not in used_targets:
                         targets.append(f"putflag-{flag_variant}")
                         retry = True
                 if retry:
@@ -644,6 +645,13 @@ def main() -> None:
     run_parser.add_argument(
         "targets", nargs="+", help="one of: {}".format(", ".join(targets))
     )
+    run_parser.add_argument(
+        "-a",
+        "--auto",
+        type=bool,
+        default=True,
+        help="automatically add required methods",
+    )
 
     sim_parser.add_argument(
         "--exploiters",
@@ -690,6 +698,7 @@ def main() -> None:
                 loop=args.loop,
                 targets=args.targets,
                 timeout=args.timeout,
+                auto=args.auto,
             )
         )
     elif args.command == "sim":
