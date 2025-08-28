@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-dink
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
@@ -25,6 +25,7 @@ jobs:
 
     - name: Setup UV
       run: |
+        sudo apt update -y && sudo apt install make
         python -m pip install uv==0.8.5
         echo "UV_FLAGS=--exact --isolated --frozen" >> $GITHUB_ENV
 
