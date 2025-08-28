@@ -25,12 +25,12 @@ jobs:
 
     - name: Setup VU
       run: |
-        echo "UV_RUN=uv run --exact --frozen" >> $GITHUB_ENV
-        python -m pip install --upgrade uv
+        python -m pip install uv==0.8.5
+        echo "UV_FLAGS=--exact --isolated --frozen" >> $GITHUB_ENV
 
     - name: Check formatting
       run: |
-        make --trace format lint test
+        make --trace format
 
     - name: Check linting
       run: |

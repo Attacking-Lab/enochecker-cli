@@ -24,7 +24,7 @@ build:
 	@uv build
 
 test:
-	@test -z $(ls tests) || \
+	@test -z "$(shell ls tests)" || \
 		($(UV_RUN) --group test coverage run -m pytest -W error -v && \
 		$(UV_RUN) --group test coverage report -m)
 
