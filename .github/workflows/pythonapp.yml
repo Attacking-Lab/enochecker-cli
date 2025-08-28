@@ -23,7 +23,7 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Setup VU
+    - name: Setup UV
       run: |
         python -m pip install uv==0.8.5
         echo "UV_FLAGS=--exact --isolated --frozen" >> $GITHUB_ENV
