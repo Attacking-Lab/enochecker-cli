@@ -37,7 +37,7 @@ sync:
 dev:
 	@git update-index --assume-unchanged lib/.enochecker3/pyproject.toml
 	@rm -rf lib/.enochecker3
-	@ln -s enochecker-core lib/.enochecker3
+	@ln -s enochecker3 lib/.enochecker3
 	@git submodule update --init --recursive lib/enochecker3
 
 .PHONY: all fix format format-fix lint lint-fix mypy test build sync dev
