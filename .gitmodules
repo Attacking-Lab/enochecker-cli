@@ -1,0 +1,3 @@
+[submodule "lib/enochecker3"]
+	path = lib/enochecker3
+	url = git@github.com:attacking-lab/enochecker3
