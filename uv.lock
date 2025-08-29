@@ -1,6 +1,10 @@
 version = 1
 revision = 3
 requires-python = ">=3.10"
+conflicts = [[
+    { package = "enochecker-cli", extra = "dev" },
+    { package = "enochecker-cli", group = "prod" },
+]]
 
 [[package]]
 name = "annotated-types"
@@ -16,10 +20,10 @@ name = "anyio"
 version = "4.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11' or (extra == 'extra-14-enochecker-cli-dev' and extra == 'group-14-enochecker-cli-prod')" },
     { name = "idna" },
     { name = "sniffio" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'extra-14-enochecker-cli-dev' and extra == 'group-14-enochecker-cli-prod')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f1/b4/636b3b65173d3ce9a38ef5f0522789614e590dab6a8d505340a4efe4c567/anyio-4.10.0.tar.gz", hash = "sha256:3f3fae35c96039744587aa5b8371e7e8e603c0702999535961dd336026973ba6", size = 213252, upload-time = "2025-08-04T08:54:26.451Z" }
 wheels = [
@@ -231,13 +235,16 @@ version = "1.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "dotenv" },
-    { name = "enochecker-core" },
-    { name = "enochecker3" },
     { name = "exrex" },
     { name = "httpx" },
     { name = "jsons" },
     { name = "requests" },
     { name = "rich" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "enochecker3", version = "0.0.9999", source = { editable = "lib/enochecker3" }, marker = "extra == 'extra-14-enochecker-cli-dev'" },
 ]
 
 [package.dev-dependencies]
@@ -252,6 +259,9 @@ format = [
 lint = [
     { name = "ruff" },
 ]
+prod = [
+    { name = "enochecker3", version = "0.11.0", source = { git = "https://github.com/attacking-lab/enochecker3?rev=v0.11.0#0d8977cd821e944b2e4f4177e2891a5671b2b41d" } },
+]
 test = [
     { name = "coverage" },
     { name = "pytest" },
@@ -263,14 +273,14 @@ typing = [
 [package.metadata]
 requires-dist = [
     { name = "dotenv", specifier = ">=0.9.9" },
-    { name = "enochecker-core", specifier = "==0.10.0" },
-    { name = "enochecker3", git = "https://github.com/attacking-lab/enochecker3?rev=v0.10.1" },
+    { name = "enochecker3", extras = ["dev"], marker = "extra == 'dev'", editable = "lib/enochecker3" },
     { name = "exrex", specifier = ">=0.12.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsons", specifier = ">=1.0.0" },
     { name = "requests", specifier = ">=2.20" },
     { name = "rich", specifier = ">=14.1.0" },
 ]
+provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -280,6 +290,7 @@ dev = [
 ]
 format = [{ name = "ruff", specifier = ">=0.12.9" }]
 lint = [{ name = "ruff", specifier = ">=0.12.9" }]
+prod = [{ name = "enochecker3", git = "https://github.com/attacking-lab/enochecker3?rev=v0.11.0" }]
 test = [
     { name = "coverage", specifier = ">=7.10.4" },
     { name = "pytest", specifier = ">=8.4.1" },
@@ -287,18 +298,14 @@ test = [
 typing = [{ name = "mypy", specifier = ">=1.17.1" }]
 
 [[package]]
-name = "enochecker-core"
-version = "0.10.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f4/2d/737e5955c50ca73e7082141e4ac199a1fbb207ec0c6e138d5cb34b8f3263/enochecker_core-0.10.0.tar.gz", hash = "sha256:378d69d97442a79e6b70f5cba40e2b3c8011b2f6bf750ccaf2a69f8f35ed6af2", size = 3741, upload-time = "2021-05-23T09:59:06.866Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/10/d0/16dbf5b955b86279610673b0b10e3e24dda53b4df678fed291248219377c/enochecker_core-0.10.0-py3-none-any.whl", hash = "sha256:0ad6eb7d0a964d0e3d679f7d699c594e8a7be03af552dcf62356de7d16aad2ed", size = 3648, upload-time = "2021-05-23T09:59:05.994Z" },
-]
+name = "enochecker3"
+version = "0.0.9999"
+source = { editable = "lib/enochecker3" }
 
 [[package]]
 name = "enochecker3"
-version = "0.10.1"
-source = { git = "https://github.com/attacking-lab/enochecker3?rev=v0.10.1#647971a30edb78eda3272d3e132c496140ee4a49" }
+version = "0.11.0"
+source = { git = "https://github.com/attacking-lab/enochecker3?rev=v0.11.0#0d8977cd821e944b2e4f4177e2891a5671b2b41d" }
 dependencies = [
     { name = "fastapi" },
     { name = "gunicorn" },
@@ -312,7 +319,7 @@ name = "exceptiongroup"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'extra-14-enochecker-cli-dev' and extra == 'group-14-enochecker-cli-prod')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0b/9f/a65090624ecf468cdca03533906e7c69ed7588582240cfe7cc9e770b50eb/exceptiongroup-1.3.0.tar.gz", hash = "sha256:b241f5885f560bc56a59ee63ca4c6a8bfa46ae4ad651af316d4e81817bb9fd88", size = 29749, upload-time = "2025-05-10T17:42:51.123Z" }
 wheels = [
@@ -461,7 +468,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mypy-extensions" },
     { name = "pathspec" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "tomli", marker = "python_full_version < '3.11' or (extra == 'extra-14-enochecker-cli-dev' and extra == 'group-14-enochecker-cli-prod')" },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/8e/22/ea637422dedf0bf36f3ef238eab4e455e2a0dcc3082b5cc067615347ab8e/mypy-1.17.1.tar.gz", hash = "sha256:25e01ec741ab5bb3eec8ba9cdb0f769230368a22c959c4937360efb89b7e9f01", size = 3352570, upload-time = "2025-07-31T07:54:19.204Z" }
@@ -707,13 +714,13 @@ name = "pytest"
 version = "8.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-14-enochecker-cli-dev' and extra == 'group-14-enochecker-cli-prod')" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11' or (extra == 'extra-14-enochecker-cli-dev' and extra == 'group-14-enochecker-cli-prod')" },
     { name = "iniconfig" },
     { name = "packaging" },
     { name = "pluggy" },
     { name = "pygments" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "tomli", marker = "python_full_version < '3.11' or (extra == 'extra-14-enochecker-cli-dev' and extra == 'group-14-enochecker-cli-prod')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/08/ba/45911d754e8eba3d5a841a5ce61a65a685ff1798421ac054f85aa8747dfb/pytest-8.4.1.tar.gz", hash = "sha256:7c67fd69174877359ed9371ec3af8a3d2b04741818c51e5e99cc1742251fa93c", size = 1517714, upload-time = "2025-06-18T05:48:06.109Z" }
 wheels = [

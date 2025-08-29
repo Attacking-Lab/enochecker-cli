@@ -10,8 +10,6 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
 	"dotenv>=0.9.9",
-	"enochecker-core==0.10.0",
-	"enochecker3",
 	"exrex>=0.12.0",
 	"httpx>=0.28.1",
 	"jsons>=1.0.0",
@@ -35,6 +33,9 @@ homepage = "https://github.com/attacking-lab/enochecker_cli"
 enochecker_cli = "enochecker_cli.main:main"
 
 [dependency-groups]
+prod = [
+    "enochecker3",
+]
 dev = [
 	"types-requests==2.31.0.1",
 	"types-urllib3==1.26.25.13",
@@ -54,13 +55,18 @@ typing = [
 	"mypy>=1.17.1",
 ]
 
+[project.optional-dependencies]
+dev = [
+	"enochecker3[dev]"
+]
+
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["enochecker_cli"]
+where = ["src"]
+include = ["*"]
 exclude = []
 
 [tool.mypy]
@@ -77,5 +83,17 @@ ignore_missing_imports = true
 module = "exrex"
 ignore_missing_imports = true
 
+[tool.uv]
+default-groups = ["prod"]
+conflicts = [
+	[
+		{ group = "prod" },
+		{ extra = "dev" }
+	],
+]
+
 [tool.uv.sources]
-enochecker3 = { git = "https://github.com/attacking-lab/enochecker3", rev = "v0.10.1" }
+enochecker3 = [
+	{ git = "https://github.com/attacking-lab/enochecker3", rev = "v0.11.0", group = "prod" },
+	{ path = "lib/enochecker3", editable = true, extra = "dev" }
+]

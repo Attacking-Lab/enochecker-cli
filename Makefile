@@ -1,5 +1,8 @@
-UV_FLAGS ?= --inexact
+UV_FLAGS ?= --inexact --no-group prod --group dev --all-extras $(UV_FLAGS_EXTRA)
 UV_RUN ?= env VIRTUAL_ENV=.venv uv run $(UV_FLAGS)
+
+
+TEST_FLAGS ?=
 
 all: format lint mypy test
 
@@ -18,14 +21,24 @@ lint-fix:
 	@$(UV_RUN) --group lint ruff check --fix
 
 mypy:
-	@$(UV_RUN) --group typing mypy enochecker_cli/
+	@$(UV_RUN) --group typing mypy src/enochecker_cli/
 
 build:
 	@uv build
 
 test:
 	@test -z "$(shell ls tests)" || \
-		($(UV_RUN) --group test coverage run -m pytest -W error -v && \
+		($(UV_RUN) --group test coverage run -m pytest -W error -v $(TEST_FLAGS) && \
 		$(UV_RUN) --group test coverage report -m)
 
-.PHONY: all fix format format-fix lint lint-fix mypy test build
+sync:
+	@uv sync $(UV_FLAGS)
+
+dev:
+	@git update-index --assume-unchanged lib/enochecker3/pyproject.toml
+	@git update-index --assume-unchanged lib/enochecker-core/pyproject.toml
+	@rm -rf lib/enochecker3 lib/enochecker-core
+	@git clone git@github.com:attacking-lab/enochecker3 lib/enochecker3
+	@git clone git@github.com:attacking-lab/enochecker-core lib/enochecker-core
+
+.PHONY: all fix format format-fix lint lint-fix mypy test build sync dev

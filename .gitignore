@@ -12,3 +12,4 @@ tmp
 /build/
 *.egg-info/
 testenv
+lib
