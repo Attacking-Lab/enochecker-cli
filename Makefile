@@ -35,10 +35,9 @@ sync:
 	@uv sync $(UV_FLAGS)
 
 dev:
-	@git update-index --assume-unchanged lib/enochecker3/pyproject.toml
-	@git update-index --assume-unchanged lib/enochecker-core/pyproject.toml
-	@rm -rf lib/enochecker3 lib/enochecker-core
-	@git clone git@github.com:attacking-lab/enochecker3 lib/enochecker3
-	@git clone git@github.com:attacking-lab/enochecker-core lib/enochecker-core
+	@git update-index --assume-unchanged lib/.enochecker3/pyproject.toml
+	@rm -rf lib/.enochecker3
+	@ln -s enochecker-core lib/.enochecker3
+	@git submodule update --init --recursive lib/enochecker3
 
 .PHONY: all fix format format-fix lint lint-fix mypy test build sync dev

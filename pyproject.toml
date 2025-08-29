@@ -57,7 +57,7 @@ typing = [
 
 [project.optional-dependencies]
 dev = [
-	"enochecker3[dev]"
+	"enochecker3[dev]",
 ]
 
 [build-system]
@@ -95,5 +95,5 @@ conflicts = [
 [tool.uv.sources]
 enochecker3 = [
 	{ git = "https://github.com/attacking-lab/enochecker3", rev = "v0.11.0", group = "prod" },
-	{ path = "lib/enochecker3", editable = true, extra = "dev" }
+	{ path = "lib/.enochecker3", editable = true, extra = "dev" }
 ]
