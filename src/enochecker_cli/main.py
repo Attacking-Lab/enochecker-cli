@@ -20,7 +20,7 @@ import requests
 import httpx
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
 
-from enochecker3.types import (
+from enochecker_core import (
     CheckerMethod,
     CheckerResultMessage,
     CheckerTaskMessage,

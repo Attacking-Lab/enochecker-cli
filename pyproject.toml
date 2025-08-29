@@ -34,7 +34,7 @@ enochecker_cli = "enochecker_cli.main:main"
 
 [dependency-groups]
 prod = [
-    "enochecker3",
+    "enochecker-core",
 ]
 dev = [
 	"types-requests==2.31.0.1",
@@ -57,7 +57,7 @@ typing = [
 
 [project.optional-dependencies]
 dev = [
-	"enochecker3[dev]",
+	"enochecker-core",
 ]
 
 [build-system]
@@ -93,7 +93,7 @@ conflicts = [
 ]
 
 [tool.uv.sources]
-enochecker3 = [
-	{ git = "https://github.com/attacking-lab/enochecker3", rev = "v0.11.0", group = "prod" },
-	{ path = "lib/.enochecker3", editable = true, extra = "dev" }
+enochecker-core = [
+	{ git = "https://github.com/attacking-lab/enochecker-core", rev = "v0.11.1", group = "prod" },
+	{ path = "lib/.enochecker-core", editable = true, extra = "dev" }
 ]

@@ -12,4 +12,4 @@ tmp
 /build/
 *.egg-info/
 testenv
-lib/.enochecker3
+lib/.enochecker-core
