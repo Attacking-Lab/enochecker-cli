@@ -1,7 +1,6 @@
 UV_FLAGS ?= --inexact --no-group prod --group dev --all-extras $(UV_FLAGS_EXTRA)
 UV_RUN ?= env VIRTUAL_ENV=.venv uv run $(UV_FLAGS)
 
-
 TEST_FLAGS ?=
 
 all: format lint mypy test
