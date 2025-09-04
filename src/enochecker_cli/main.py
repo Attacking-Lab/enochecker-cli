@@ -12,7 +12,6 @@ import collections
 import secrets
 from typing_extensions import Self
 import os
-import jsons
 
 from dotenv import load_dotenv
 import exrex
@@ -85,11 +84,7 @@ class CheckerClient:
         response = await self._client.get(f"{self.url}/service")
         if response.status_code != 200:
             raise RuntimeError("Failed to get /service from checker")
-        metadata = jsons.loads(
-            response.text,
-            CheckerInfoMessage,
-            key_transformer=jsons.KEY_TRANSFORMER_SNAKECASE,
-        )
+        metadata = CheckerInfoMessage.model_validate_json(response.text)
         self.flag_variants = metadata.flag_variants
         self.noise_variants = metadata.noise_variants
         self.havoc_variants = metadata.havoc_variants
@@ -116,26 +111,16 @@ class CheckerClient:
         self, message: CheckerTaskMessage
     ) -> tuple[CheckerResultMessage, float]:
         assert self._connected, "Client is not connected (did you forget `async with`)?"
-        json = jsons.dumps(
-            message,
-            use_enum_name=False,
-            key_transformer=jsons.KEY_TRANSFORMER_CAMELCASE,
-            strict=True,
-        )
         start = time.monotonic()
         response = await self._client.post(
             self.url,
-            content=json,
+            content=message.model_dump_json(),
             headers={"Content-Type": "application/json"},
             timeout=self.timeout,
         )
         end = time.monotonic()
         assert response.status_code == 200, response.text
-        result: CheckerResultMessage = jsons.loads(
-            response.text,
-            CheckerResultMessage,
-            key_transformer=jsons.KEY_TRANSFORMER_SNAKECASE,
-        )
+        result = CheckerResultMessage.model_validate_json(response.text)
         status = CheckerTaskResult(result.result)
         if message.method != CheckerMethod.EXPLOIT:
             assert status == CheckerTaskResult.OK, response.text
@@ -498,12 +483,7 @@ def task_message_from_namespace(ns: argparse.Namespace) -> CheckerTaskMessage:
 def dispatch_raw_task(
     checker_address: str, checker_port: int, task: CheckerTaskMessage
 ):
-    msg = jsons.dumps(
-        task,
-        use_enum_name=False,
-        key_transformer=jsons.KEY_TRANSFORMER_CAMELCASE,
-        strict=True,
-    )
+    msg = task.model_dump_json()
 
     result = requests.post(
         f"http://{checker_address}:{checker_port}",
@@ -511,7 +491,7 @@ def dispatch_raw_task(
         headers={"content-type": "application/json"},
     )
     if result.ok:
-        result_msg = jsons.loads(result.text, CheckerResultMessage)
+        result_msg = CheckerResultMessage.model_validate_json(result.text)
         print(result_msg.result)
     else:
         print(result.status_code)
@@ -525,41 +505,50 @@ def main() -> None:
         description="Your friendly checker script", allow_abbrev=True
     )
 
-    checker_address = os.environ.get("ENOCHECKER_CHECKER_ADDRESS") or "localhost"
     parser.add_argument(
         "-a",
         "--checker-address",
-        type=str,
-        default=checker_address,
-        help="address on which checker is listening",
+        default=os.environ.get("ENOCHECKER_CHECKER_ADDRESS", "localhost"),
+        help="The address on which the checker is listening",
     )
-
-    checker_port = int(os.environ.get("ENOCHECKER_CHECKER_PORT") or "-1")
+    parser.add_argument(
+        "-n",
+        "--checker-network",
+        help="The name of the checker docker network to determine the IP from",
+        default=os.environ.get("ENOCHECKER_CHECKER_NETWORK"),
+    )
     parser.add_argument(
         "-p",
         "--checker-port",
         type=int,
-        default=checker_port,
+        choices=range(1, 65536),
+        default=int(os.environ.get("ENOCHECKER_CHECKER_PORT", "-1")),
         metavar="{1..65535}",
-        help="port on which the checker is listening",
+        help="The port on which the checker is listening",
     )
-
-    service_address = os.environ.get("ENOCHECKER_SERVICE_ADDRESS") or ""
     parser.add_argument(
         "-A",
         "--service-address",
-        type=str,
-        default=service_address,
-        help="address at which service is reachable by checker",
+        help="The address on which the checker can reach the service",
+        default=os.environ.get("ENOCHECKER_SERVICE_ADDRESS", ""),
     )
-
-    parser.add_argument("--flag-regex", type=str, default=r"ENO[a-zA-Z0-9+/]{48}")
-
+    parser.add_argument(
+        "-N",
+        "--service-network",
+        help="The name of the service docker network to determine the IP from",
+        default=os.environ.get("ENOCHECKER_SERVICE_NETWORK"),
+    )
+    parser.add_argument(
+        "--flag-regex",
+        type=str,
+        help="Regular expression used for matching flags",
+        default=r"ENO[a-zA-Z0-9+/]{48}",
+    )
     parser.add_argument(
         "--timeout",
         type=int,
         default=60,
-        help="number of seconds to wait until a checker tasks complete",
+        help="Number of seconds to wait until a checker task completes",
     )
 
     commands_group = parser.add_subparsers(dest="command", title="Commands")
@@ -678,6 +667,18 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    if args.service_network or args.checker_network:
+        import docker
+
+        client = docker.from_env()
+        if args.service_network and not args.service_address:
+            network = client.networks.get(args.service_network)
+            args.service_address = network.attrs["IPAM"]["Config"][0]["Gateway"]
+
+        if args.checker_network and not args.checker_address:
+            network = client.networks.get(args.service_network)
+            args.checker_address = network.attrs["IPAM"]["Config"][0]["Gateway"]
 
     if args.service_address == "":
         raise ValueError("Specify service address via -A or ENOCHECKER_SERVICE_ADDRESS")

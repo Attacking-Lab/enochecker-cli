@@ -9,10 +9,10 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
+	"docker>=7.1.0",
 	"dotenv>=0.9.9",
 	"exrex>=0.12.0",
 	"httpx>=0.28.1",
-	"jsons>=1.0.0",
 	"requests>=2.20",
 	"rich>=14.1.0",
 ]
@@ -53,6 +53,7 @@ test = [
 ]
 typing = [
 	"mypy>=1.17.1",
+	"types-docker>=7.1.0.20250822",
 	"types-requests>=2.31.0.1",
 ]
 
@@ -75,10 +76,6 @@ check_untyped_defs = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unreachable = true
-
-[[tool.mypy.overrides]]
-module = "jsons"
-ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "exrex"
