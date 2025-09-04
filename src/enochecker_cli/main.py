@@ -37,10 +37,14 @@ class LogEntry:
     variant_id: int
     team: int | None
     time_taken: float
-    attempt: int | None = None
+    repeat: int
 
     def to_csv(self) -> str:
-        return f"{self.round_id},{self.operation},{self.variant_id},{self.attempt or ''},{self.team or ''},{self.time_taken}"
+        return f"{self.round_id},{self.operation},{self.variant_id},{self.repeat},{self.team or ''},{self.time_taken}"
+
+    @staticmethod
+    def csv_header() -> str:
+        return "round_id,operation,variant_id,repeat,team,time_taken"
 
 
 class CheckerClient:
@@ -64,7 +68,7 @@ class CheckerClient:
         self._log: TextIOWrapper | None = None
         self._connected = False
         self._token = "loadtest-" + secrets.token_urlsafe(10)
-        self._flags: dict[int, dict[int, tuple[str, str | None]]] = (
+        self._flags: dict[int, dict[tuple[int, int], tuple[str, str | None]]] = (
             collections.defaultdict(dict)
         )
         self._exploit_variants: dict[int, set] = defaultdict(lambda: set())
@@ -81,6 +85,8 @@ class CheckerClient:
         self._log = (
             open(self.output_path, "w").__enter__() if self.output_path else None
         )
+        if self._log:
+            self._log.write(LogEntry.csv_header() + "\n")
         response = await self._client.get(f"{self.url}/service")
         if response.status_code != 200:
             raise RuntimeError("Failed to get /service from checker")
@@ -153,15 +159,16 @@ class CheckerClient:
         flag: str | None,
         variant_id: int,
         attack_info: str | None,
+        repeat: int = 0,
     ) -> CheckerTaskMessage:
         prev_id, self._id = self._id, self._id + 1
         if method in (CheckerMethod.PUTFLAG, CheckerMethod.GETFLAG):
-            chain_id = f"flag-{round_id}-{variant_id}-{self._token}"
+            chain_id = f"flag-{round_id}-{variant_id}-{repeat}-{self._token}"
         elif method in (CheckerMethod.PUTNOISE, CheckerMethod.GETNOISE):
-            chain_id = f"noise-{round_id}-{variant_id}-{self._token}"
+            chain_id = f"noise-{round_id}-{variant_id}-{repeat}-{self._token}"
         else:
             prev_id, self._id = self._id, self._id + 1
-            chain_id = f"unique-{prev_id}-{self._token}"
+            chain_id = f"unique-{prev_id}-{repeat}-{self._token}"
         return CheckerTaskMessage(
             task_id=prev_id,
             method=method,
@@ -180,7 +187,7 @@ class CheckerClient:
             attack_info=attack_info,
         )
 
-    async def putflag(self, round_id: int, variant_id: int) -> LogEntry:
+    async def putflag(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
         flag = exrex.getone(self.flag_regex, limit=64)
         message = self._build_request(
             method=CheckerMethod.PUTFLAG,
@@ -188,55 +195,60 @@ class CheckerClient:
             flag=flag,
             variant_id=variant_id,
             attack_info=None,
+            repeat=repeat,
         )
         response, duration = await self._request(message)
-        self._flags[round_id][variant_id] = (flag, response.attack_info)
-        return LogEntry(round_id, "putflag", variant_id, None, duration)
+        self._flags[round_id][(variant_id, repeat)] = (flag, response.attack_info)
+        return LogEntry(round_id, "putflag", variant_id, None, duration, repeat)
 
-    async def getflag(self, round_id: int, variant_id: int) -> LogEntry:
-        flag, attack_info = self._flags[round_id][variant_id]
+    async def getflag(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
+        flag, attack_info = self._flags[round_id][(variant_id, repeat)]
         message = self._build_request(
             method=CheckerMethod.GETFLAG,
             round_id=round_id,
             flag=flag,
             variant_id=variant_id,
             attack_info=attack_info,
+            repeat=repeat,
         )
         _, duration = await self._request(message)
-        return LogEntry(round_id, "getflag", variant_id, None, duration)
+        return LogEntry(round_id, "getflag", variant_id, None, duration, repeat)
 
-    async def putnoise(self, round_id: int, variant_id: int) -> LogEntry:
+    async def putnoise(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
         message = self._build_request(
             method=CheckerMethod.PUTNOISE,
             round_id=round_id,
             flag=None,
             variant_id=variant_id,
             attack_info=None,
+            repeat=repeat,
         )
         _, duration = await self._request(message)
-        return LogEntry(round_id, "putnoise", variant_id, None, duration)
+        return LogEntry(round_id, "putnoise", variant_id, None, duration, repeat)
 
-    async def getnoise(self, round_id: int, variant_id: int) -> LogEntry:
+    async def getnoise(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
         message = self._build_request(
             method=CheckerMethod.GETNOISE,
             round_id=round_id,
             flag=None,
             variant_id=variant_id,
             attack_info=None,
+            repeat=repeat,
         )
         _, duration = await self._request(message)
-        return LogEntry(round_id, "getnoise", variant_id, None, duration)
+        return LogEntry(round_id, "getnoise", variant_id, None, duration, repeat)
 
-    async def havoc(self, round_id: int, variant_id: int) -> LogEntry:
+    async def havoc(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
         message = self._build_request(
             method=CheckerMethod.HAVOC,
             round_id=round_id,
             flag=None,
             variant_id=variant_id,
             attack_info=None,
+            repeat=repeat,
         )
         _, duration = await self._request(message)
-        return LogEntry(round_id, "havoc", variant_id, None, duration)
+        return LogEntry(round_id, "havoc", variant_id, None, duration, repeat)
 
     async def exploit(
         self, round_id: int, variant_id: int, source_team: int
@@ -249,7 +261,9 @@ class CheckerClient:
             flag_ids = list(range(self.flag_variants))
 
         for flag_id in flag_ids:
-            flag, attack_info = self._flags[round_id][flag_id]
+            # Always try to get the flag for repetition 0.
+            # TODO: If the multiplier is higher, we can pick randomly here.
+            flag, attack_info = self._flags[round_id][(flag_id, 0)]
             message = self._build_request(
                 method=CheckerMethod.EXPLOIT,
                 round_id=round_id,
@@ -274,21 +288,37 @@ class CheckerClient:
         assert self._connected, "Client is not connected (did you forget `async with`)?"
 
         put: list[tuple] = [
-            (self.putflag, variant_id) for variant_id in range(self.flag_variants)
-        ] + [(self.putnoise, variant_id) for variant_id in range(self.noise_variants)]
-        put = put * multiplier
+            (self.putflag, variant_id, repeat)
+            for variant_id in range(self.flag_variants)
+            for repeat in range(multiplier)
+        ] + [
+            (self.putnoise, variant_id, repeat)
+            for variant_id in range(self.noise_variants)
+            for repeat in range(multiplier)
+        ]
 
         get: list[tuple] = (
-            [(self.getflag, variant_id) for variant_id in range(self.flag_variants)]
-            + [(self.getnoise, variant_id) for variant_id in range(self.noise_variants)]
-            + [(self.havoc, variant_id) for variant_id in range(self.havoc_variants)]
+            [
+                (self.getflag, variant_id, repeat)
+                for variant_id in range(self.flag_variants)
+                for repeat in range(multiplier)
+            ]
+            + [
+                (self.getnoise, variant_id, repeat)
+                for variant_id in range(self.noise_variants)
+                for repeat in range(multiplier)
+            ]
+            + [
+                (self.havoc, variant_id, repeat)
+                for variant_id in range(self.havoc_variants)
+                for repeat in range(multiplier)
+            ]
+            + [
+                (self.exploit, variant_id, team)
+                for variant_id in range(self.exploit_variants)
+                for team in range(exploiters)
+            ]
         )
-        get = get * multiplier
-        get += [
-            (self.exploit, variant_id, team)
-            for variant_id in range(self.exploit_variants)
-            for team in range(exploiters)
-        ]
 
         self.add_log_entries(
             await asyncio.gather(*[op(round_id, *args) for op, *args in put])
