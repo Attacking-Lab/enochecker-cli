@@ -453,7 +453,9 @@ async def run_chain(
             else:
                 raise ValueError(f"Unknown method {method_name}")
             seen.add((method_name, variant_id, repeat_id))
-            print(f"\x1b[31;1mcall\x1b[0m:         {method_name}-{variant_id}-{repeat_id}")
+            print(
+                f"\x1b[31;1mcall\x1b[0m:         {method_name}-{variant_id}-{repeat_id}"
+            )
             resolved_targets.append(method)
 
             targets.pop()
