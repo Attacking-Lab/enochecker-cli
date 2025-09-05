@@ -381,7 +381,8 @@ async def run_chain(
     ) as client:
         print(client.display())
 
-        used_targets = set()
+        seen = set()
+        repeat_seq = 0
         resolved_targets = []
         targets = targets[::-1]
         while len(targets) > 0:
@@ -412,39 +413,55 @@ async def run_chain(
                     raise ValueError(f"Unknown method {method_name}")
                 continue
 
-            method_name, variant_str = target.rsplit("-", 1)
+            method_name, variant_str, *a = target.rsplit("-")
             variant_id = int(variant_str)
+
+            # NOTE: Without --no-auto
+            # `enochecker_cli run putflag-0 getflag-0`
+            # will result in:
+            #   putflag-0-0, putflag-0-1, getflag-0-1
+            # instead of:
+            #   putflag-0-0, getflag-0-0
+            assert len(a) in (0, 1), f"Invalid target: {target}"
+            if len(a) == 1:
+                repeat_id = int(a[0])
+            else:
+                if auto and (method_name, variant_id, repeat_seq) in seen:
+                    repeat_seq += 1
+                repeat_id = repeat_seq
 
             method: tuple
             if method_name == "putflag":
-                method = (client.putflag, variant_id)
+                method = (client.putflag, variant_id, repeat_id)
             elif method_name == "getflag":
-                if auto and ("putflag", variant_id) not in used_targets:
-                    targets.append(f"putflag-{variant_id}")
+                if auto and ("putflag", variant_id, repeat_id) not in seen:
+                    targets.append(f"putflag-{variant_id}-{repeat_id}")
                     continue
-                method = (client.getflag, variant_id)
+                method = (client.getflag, variant_id, repeat_id)
             elif method_name == "putnoise":
-                method = (client.putnoise, variant_id)
+                method = (client.putnoise, variant_id, repeat_id)
             elif method_name == "getnoise":
-                if auto and ("putnoise", variant_id) not in used_targets:
+                if auto and ("putnoise", variant_id, repeat_id) not in seen:
                     targets.append(f"putnoise-{variant_id}")
                     continue
-                method = (client.getnoise, variant_id)
+                method = (client.getnoise, variant_id, repeat_id)
             elif method_name == "havoc":
-                method = (client.havoc, variant_id)
+                method = (client.havoc, variant_id, repeat_id)
             elif method_name == "exploit":
                 retry = False
                 for flag_variant in reversed(range(client.flag_variants)):
-                    if auto and ("putflag", flag_variant) not in used_targets:
+                    if auto and ("putflag", flag_variant) not in seen:
                         targets.append(f"putflag-{flag_variant}")
                         retry = True
                 if retry:
                     continue
-                method = (client.exploit, variant_id, 0)
+                method = (client.exploit, variant_id, 0, repeat_id)
             else:
                 raise ValueError(f"Unknown method {method_name}")
-            used_targets.add((method_name, variant_id))
-            print(f"\x1b[31;1mcall\x1b[0m:         {method_name}-{variant_id}")
+            seen.add((method_name, variant_id, repeat_id))
+            print(
+                f"\x1b[31;1mcall\x1b[0m:         {method_name}-{variant_id}-{repeat_id}"
+            )
             resolved_targets.append(method)
 
             targets.pop()
