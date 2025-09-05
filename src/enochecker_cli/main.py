@@ -56,7 +56,7 @@ class CheckerClient:
         output: pathlib.Path | None,
         flag_regex: str,
         timeout: int,
-        seed: int = 0
+        seed: int = 0,
     ):
         self.output_path = output
         self.service_address = service_address
@@ -340,7 +340,7 @@ async def run_sim(
     multiplier: int,
     output: pathlib.Path | None,
     timeout: int,
-    seed: int
+    seed: int,
 ):
     url = f"http://{checker_address}:{checker_port}"
     async with CheckerClient(
@@ -373,10 +373,12 @@ async def run_chain(
     targets: list[str],
     timeout: int,
     auto: bool,
-    seed: int
+    seed: int,
 ):
     url = f"http://{checker_address}:{checker_port}"
-    async with CheckerClient(url, service_address, None, flag_regex, timeout, seed=seed) as client:
+    async with CheckerClient(
+        url, service_address, None, flag_regex, timeout, seed=seed
+    ) as client:
         print(client.display())
 
         used_targets = set()
@@ -676,11 +678,7 @@ def main() -> None:
         help="automatically add required methods",
     )
     run_parser.add_argument(
-        "-s",
-        "--seed",
-        type=int,
-        default=0,
-        help="seed for task generator"
+        "-s", "--seed", type=int, default=0, help="seed for task generator"
     )
 
     sim_parser.add_argument(
@@ -707,11 +705,7 @@ def main() -> None:
         type=pathlib.Path,
     )
     sim_parser.add_argument(
-        "-s",
-        "--seed",
-        type=int,
-        default=0,
-        help="seed for task generator"
+        "-s", "--seed", type=int, default=0, help="seed for task generator"
     )
 
     args = parser.parse_args()
@@ -748,7 +742,7 @@ def main() -> None:
                 targets=args.targets,
                 timeout=args.timeout,
                 auto=args.auto,
-                seed=args.seed
+                seed=args.seed,
             )
         )
     elif args.command == "sim":
@@ -763,7 +757,7 @@ def main() -> None:
                 exploiters=args.exploiters,
                 output=args.statistics,
                 timeout=args.timeout,
-                seed=args.seed
+                seed=args.seed,
             )
         )
     else:
