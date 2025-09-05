@@ -375,7 +375,7 @@ async def run_chain(
     async with CheckerClient(url, service_address, None, flag_regex, timeout) as client:
         print(client.display())
 
-        used_targets = set()
+        target_counts = defaultdict(lambda: 0)
         resolved_targets = []
         targets = targets[::-1]
         while len(targets) > 0:
@@ -413,14 +413,14 @@ async def run_chain(
             if method_name == "putflag":
                 method = (client.putflag, variant_id)
             elif method_name == "getflag":
-                if auto and ("putflag", variant_id) not in used_targets:
+                if auto and ("putflag", variant_id) not in target_counts:
                     targets.append(f"putflag-{variant_id}")
                     continue
                 method = (client.getflag, variant_id)
             elif method_name == "putnoise":
                 method = (client.putnoise, variant_id)
             elif method_name == "getnoise":
-                if auto and ("putnoise", variant_id) not in used_targets:
+                if auto and ("putnoise", variant_id) not in target_counts:
                     targets.append(f"putnoise-{variant_id}")
                     continue
                 method = (client.getnoise, variant_id)
@@ -429,7 +429,7 @@ async def run_chain(
             elif method_name == "exploit":
                 retry = False
                 for flag_variant in reversed(range(client.flag_variants)):
-                    if auto and ("putflag", flag_variant) not in used_targets:
+                    if auto and ("putflag", flag_variant) not in target_counts:
                         targets.append(f"putflag-{flag_variant}")
                         retry = True
                 if retry:
@@ -437,9 +437,10 @@ async def run_chain(
                 method = (client.exploit, variant_id, 0)
             else:
                 raise ValueError(f"Unknown method {method_name}")
-            used_targets.add((method_name, variant_id))
+            repeat = target_counts[(method_name, variant_id)]
+            target_counts[(method_name, variant_id)] += 1
             print(f"\x1b[31;1mcall\x1b[0m:         {method_name}-{variant_id}")
-            resolved_targets.append(method)
+            resolved_targets.append((*method, repeat))
 
             targets.pop()
 
