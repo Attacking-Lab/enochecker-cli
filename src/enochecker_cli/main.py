@@ -688,11 +688,10 @@ def main() -> None:
         "targets", nargs="+", help="one of: {}".format(", ".join(targets))
     )
     run_parser.add_argument(
-        "-a",
         "--auto",
-        type=bool,
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="automatically add required methods",
+        help="choose whether to automatically add required methods (default: yes)",
     )
     run_parser.add_argument(
         "-s", "--seed", type=int, default=0, help="seed for task generator"
