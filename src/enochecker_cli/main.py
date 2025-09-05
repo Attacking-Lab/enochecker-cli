@@ -665,9 +665,10 @@ def main() -> None:
         "targets", nargs="+", help="one of: {}".format(", ".join(targets))
     )
     run_parser.add_argument(
-        "--no-auto",
-        action="store_true",
-        help="dont automatically add required methods",
+        "--auto",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="choose whether to automatically add required methods",
     )
 
     sim_parser.add_argument(
@@ -727,7 +728,7 @@ def main() -> None:
                 loop=args.loop,
                 targets=args.targets,
                 timeout=args.timeout,
-                auto=not args.no_auto,
+                auto=args.auto,
             )
         )
     elif args.command == "sim":
