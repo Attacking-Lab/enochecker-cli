@@ -431,16 +431,16 @@ async def run_chain(
                 if auto and ("putflag", variant_id, repeat_id) not in seen:
                     targets.append(f"putflag-{variant_id}-{repeat_id}")
                     continue
-                method = (client.getflag, variant_id)
+                method = (client.getflag, variant_id, repeat_id)
             elif method_name == "putnoise":
-                method = (client.putnoise, variant_id)
+                method = (client.putnoise, variant_id, repeat_id)
             elif method_name == "getnoise":
-                if auto and ("putnoise", variant_id) not in seen:
+                if auto and ("putnoise", variant_id, repeat_id) not in seen:
                     targets.append(f"putnoise-{variant_id}")
                     continue
-                method = (client.getnoise, variant_id)
+                method = (client.getnoise, variant_id, repeat_id)
             elif method_name == "havoc":
-                method = (client.havoc, variant_id)
+                method = (client.havoc, variant_id, repeat_id)
             elif method_name == "exploit":
                 retry = False
                 for flag_variant in reversed(range(client.flag_variants)):
@@ -449,7 +449,7 @@ async def run_chain(
                         retry = True
                 if retry:
                     continue
-                method = (client.exploit, variant_id, 0)
+                method = (client.exploit, variant_id, 0, repeat_id)
             else:
                 raise ValueError(f"Unknown method {method_name}")
             seen.add((method_name, variant_id, repeat_id))
