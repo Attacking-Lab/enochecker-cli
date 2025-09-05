@@ -667,8 +667,8 @@ def main() -> None:
     run_parser.add_argument(
         "--auto",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="choose whether to automatically add required methods",
+        default=True,
+        help="choose whether to automatically add required methods (default: yes)",
     )
 
     sim_parser.add_argument(
