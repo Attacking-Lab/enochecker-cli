@@ -14,6 +14,7 @@ from typing_extensions import Self
 import os
 
 from dotenv import load_dotenv
+from random import Random, SystemRandom
 import exrex
 import requests
 import httpx
@@ -55,6 +56,7 @@ class CheckerClient:
         output: pathlib.Path | None,
         flag_regex: str,
         timeout: int,
+        seed: int = 0,
     ):
         self.output_path = output
         self.service_address = service_address
@@ -63,7 +65,8 @@ class CheckerClient:
         if "://" not in self.url:
             self.url = "http://" + self.url
 
-        self._id = 0
+        random_source = SystemRandom if seed == 0 else Random
+        self._id_random = random_source(seed)
         self._client = httpx.AsyncClient()
         self._log: TextIOWrapper | None = None
         self._connected = False
@@ -161,16 +164,15 @@ class CheckerClient:
         attack_info: str | None,
         repeat: int = 0,
     ) -> CheckerTaskMessage:
-        prev_id, self._id = self._id, self._id + 1
+        task_id = self._id_random.randint(0, 1 << 64)
         if method in (CheckerMethod.PUTFLAG, CheckerMethod.GETFLAG):
             chain_id = f"flag-{round_id}-{variant_id}-{repeat}-{self._token}"
         elif method in (CheckerMethod.PUTNOISE, CheckerMethod.GETNOISE):
             chain_id = f"noise-{round_id}-{variant_id}-{repeat}-{self._token}"
         else:
-            prev_id, self._id = self._id, self._id + 1
-            chain_id = f"unique-{prev_id}-{repeat}-{self._token}"
+            chain_id = f"unique-{task_id}-{repeat}-{self._token}"
         return CheckerTaskMessage(
-            task_id=prev_id,
+            task_id=task_id,
             method=method,
             address=self.service_address,
             team_id=0,
@@ -338,10 +340,11 @@ async def run_sim(
     multiplier: int,
     output: pathlib.Path | None,
     timeout: int,
+    seed: int,
 ):
     url = f"http://{checker_address}:{checker_port}"
     async with CheckerClient(
-        url, service_address, output, flag_regex, timeout
+        url, service_address, output, flag_regex, timeout, seed=seed
     ) as client:
         print(client.display())
         print(f"\x1b[31;1mrounds\x1b[0m:       {rounds}")
@@ -370,9 +373,12 @@ async def run_chain(
     targets: list[str],
     timeout: int,
     auto: bool,
+    seed: int,
 ):
     url = f"http://{checker_address}:{checker_port}"
-    async with CheckerClient(url, service_address, None, flag_regex, timeout) as client:
+    async with CheckerClient(
+        url, service_address, None, flag_regex, timeout, seed=seed
+    ) as client:
         print(client.display())
 
         used_targets = set()
@@ -671,6 +677,9 @@ def main() -> None:
         default=True,
         help="automatically add required methods",
     )
+    run_parser.add_argument(
+        "-s", "--seed", type=int, default=0, help="seed for task generator"
+    )
 
     sim_parser.add_argument(
         "--exploiters",
@@ -694,6 +703,9 @@ def main() -> None:
         metavar="PATH",
         help="collect statistics into this file",
         type=pathlib.Path,
+    )
+    sim_parser.add_argument(
+        "-s", "--seed", type=int, default=0, help="seed for task generator"
     )
 
     args = parser.parse_args()
@@ -730,6 +742,7 @@ def main() -> None:
                 targets=args.targets,
                 timeout=args.timeout,
                 auto=args.auto,
+                seed=args.seed,
             )
         )
     elif args.command == "sim":
@@ -744,6 +757,7 @@ def main() -> None:
                 exploiters=args.exploiters,
                 output=args.statistics,
                 timeout=args.timeout,
+                seed=args.seed,
             )
         )
     else:
