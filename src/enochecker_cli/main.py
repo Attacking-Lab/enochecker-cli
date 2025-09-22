@@ -278,7 +278,9 @@ class CheckerClient:
                 if result.flag == flag:
                     self._exploit_variants[variant_id].add(flag_id)
             else:
-                assert result.message == "Flag not found", result.message
+                assert result.message in ("No flags found", "Flag not found"), (
+                    result.message
+                )
             return LogEntry(
                 round_id, "exploit", variant_id, source_team, duration, flag_id
             )
