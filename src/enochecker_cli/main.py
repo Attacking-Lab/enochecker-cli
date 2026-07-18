@@ -287,7 +287,11 @@ class CheckerClient:
         assert False, f"No flag for any flag ID for exploit {variant_id}"
 
     async def simulate_round(
-        self, round_id: int, multiplier: int, exploiters: int
+        self,
+        round_id: int,
+        multiplier: int,
+        exploiters: int,
+        round_time: int | None = None,
     ) -> None:
         assert self._connected, "Client is not connected (did you forget `async with`)?"
 
@@ -324,45 +328,91 @@ class CheckerClient:
             ]
         )
 
-        self.add_log_entries(
-            await asyncio.gather(*[op(round_id, *args) for op, *args in put])
-        )
-        self.add_log_entries(
-            await asyncio.gather(*[op(round_id, *args) for op, *args in get])
-        )
+        if round_time is None:
+            self.add_log_entries(
+                await asyncio.gather(*[op(round_id, *args) for op, *args in put])
+            )
+            self.add_log_entries(
+                await asyncio.gather(*[op(round_id, *args) for op, *args in get])
+            )
+            return
+
+        # Split the round into `timeout`-long phases. Puts occupy the first
+        # half so gets in later phases are guaranteed to start after the
+        # corresponding put has either completed or timed out.
+        n_phases = max(2, round_time // self.timeout)
+        n_put_phases = n_phases // 2
+        n_get_phases = n_phases - n_put_phases
+
+        def chunkify(items: list[tuple], n: int) -> list[list[tuple]]:
+            chunks: list[list[tuple]] = [[] for _ in range(n)]
+            for i, item in enumerate(items):
+                chunks[i % n].append(item)
+            return chunks
+
+        phases = chunkify(put, n_put_phases) + chunkify(get, n_get_phases)
+
+        round_start = time.monotonic()
+        for i, phase_tasks in enumerate(phases):
+            phase_start = round_start + i * self.timeout
+            now = time.monotonic()
+            if now < phase_start:
+                await asyncio.sleep(phase_start - now)
+            if phase_tasks:
+                self.add_log_entries(
+                    await asyncio.gather(
+                        *[op(round_id, *args) for op, *args in phase_tasks]
+                    )
+                )
+        remaining = round_start + round_time - time.monotonic()
+        if remaining > 0:
+            await asyncio.sleep(remaining)
 
 
 async def run_sim(
     checker_address: str,
     checker_port: int,
     service_address: str,
-    rounds: int,
+    rounds: int | None,
     exploiters: int,
     flag_regex: str,
     multiplier: int,
     output: pathlib.Path | None,
     timeout: int,
     seed: int,
+    round_time: int | None,
 ):
     url = f"http://{checker_address}:{checker_port}"
     async with CheckerClient(
         url, service_address, output, flag_regex, timeout, seed=seed
     ) as client:
         print(client.display())
-        print(f"\x1b[31;1mrounds\x1b[0m:       {rounds}")
+        print(
+            f"\x1b[31;1mrounds\x1b[0m:       {'unlimited' if rounds is None else rounds}"
+        )
         print(f"\x1b[31;1mexploiters\x1b[0m:   {exploiters}")
         print(f"\x1b[31;1mmultiplier\x1b[0m:   {multiplier}")
+        if round_time is not None:
+            n_phases = max(2, round_time // timeout)
+            print(
+                f"\x1b[31;1mround-time\x1b[0m:   {round_time}s ({n_phases} phases of {timeout}s)"
+            )
 
         round_id_base = random.randint(0, 10000000000)
         with Progress(
             TextColumn("[progress.description]"), BarColumn(), MofNCompleteColumn()
         ) as progress:
             task = progress.add_task("Simulating..", total=rounds)
-            for round_id in range(rounds):
+            round_id = 0
+            while rounds is None or round_id < rounds:
                 await client.simulate_round(
-                    round_id_base + round_id, multiplier, exploiters
+                    round_id_base + round_id,
+                    multiplier,
+                    exploiters,
+                    round_time=round_time,
                 )
                 progress.update(task, advance=1)
+                round_id += 1
 
 
 async def run_chain(
@@ -714,7 +764,10 @@ def main() -> None:
         help="multiplier for non-exploit traffic",
     )
     sim_parser.add_argument(
-        "--rounds", type=int, default=1000, help="number of rounds to simulate"
+        "--rounds",
+        type=int,
+        default=None,
+        help="number of rounds to simulate (default: run until interrupted)",
     )
     sim_parser.add_argument(
         "--statistics",
@@ -724,6 +777,15 @@ def main() -> None:
     )
     sim_parser.add_argument(
         "-s", "--seed", type=int, default=0, help="seed for task generator"
+    )
+    sim_parser.add_argument(
+        "--round-time",
+        type=int,
+        default=None,
+        metavar="SECONDS",
+        help="spread each round's tasks across phases of `--timeout` seconds; "
+        "puts run in the first half of phases and gets in the second half so "
+        "getflag/getnoise never race their corresponding put",
     )
 
     args = parser.parse_args()
@@ -776,6 +838,7 @@ def main() -> None:
                 output=args.statistics,
                 timeout=args.timeout,
                 seed=args.seed,
+                round_time=args.round_time,
             )
         )
     else:

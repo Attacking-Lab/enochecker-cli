@@ -87,7 +87,8 @@ options:
 
 ```
 usage: enochecker_cli sim [-h] [--exploiters EXPLOITERS] [-m FACTOR]
-                          [--rounds ROUNDS] [--statistics PATH]
+                          [--rounds ROUNDS] [--statistics PATH] [-s SEED]
+                          [--round-time SECONDS]
 
 options:
   -h, --help            show this help message and exit
@@ -95,8 +96,15 @@ options:
                         number of exploiters to simulate
   -m FACTOR, --multiply FACTOR
                         multiplier for non-exploit traffic
-  --rounds ROUNDS       number of rounds to simulate
+  --rounds ROUNDS       number of rounds to simulate (default: run until
+                        interrupted)
   --statistics PATH     collect statistics into this file
+  -s SEED, --seed SEED  seed for task generator
+  --round-time SECONDS  spread each round's tasks across phases of
+                        `--timeout` seconds; puts run in the first half
+                        of phases and gets in the second half so
+                        getflag/getnoise never race their corresponding
+                        put
 ```
 
 ## Installation
