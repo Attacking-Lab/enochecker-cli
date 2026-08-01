@@ -88,7 +88,8 @@ options:
 ```
 usage: enochecker_cli sim [-h] [--exploiters EXPLOITERS] [-m FACTOR]
                           [--rounds ROUNDS] [--statistics PATH] [-s SEED]
-                          [--round-time SECONDS]
+                          [--round-time SECONDS] [--concurrency C]
+                          [--jitter | --no-jitter]
 
 options:
   -h, --help            show this help message and exit
@@ -100,12 +101,25 @@ options:
                         interrupted)
   --statistics PATH     collect statistics into this file
   -s SEED, --seed SEED  seed for task generator
-  --round-time SECONDS  spread each round's tasks across phases of
-                        `--timeout` seconds; puts run in the first half
-                        of phases and gets in the second half so
-                        getflag/getnoise never race their corresponding
-                        put
+  --round-time SECONDS  spread each round's tasks across the round using
+                        the task scheduler (round-grid EDF with sub-round
+                        jitter); putflag/putnoise are scheduled at least
+                        `--timeout` seconds before their corresponding
+                        getflag/getnoise so they never race
+  --concurrency C       max concurrent checker requests per round when
+                        --round-time is set (default: 4)
+  --jitter, --no-jitter
+                        randomize sub-round start offsets so timings stay
+                        unpredictable when --round-time is set (default:
+                        yes)
 ```
+
+`--round-time` uses the same round-grid EDF task scheduler as
+[atklab/gameserver](https://git.dev.sinitax.com/atklab/gameserver)'s eno
+runner (vendored into `enochecker_cli.task_scheduler`): it statically
+verifies the round is feasible for the given `--timeout`/`--concurrency`
+before simulating, then samples one valid, concurrency-bounded schedule per
+round with optional sub-round jitter for unpredictable timings.
 
 ## Installation
 
