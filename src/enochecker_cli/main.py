@@ -28,7 +28,7 @@ from enochecker_core import (
     CheckerTaskResult,
 )
 
-from enochecker_cli.task_scheduler import Problem, sample_schedule, verify
+from enochecker_cli.scheduling import DEFAULT_SCHEDULER, SCHEDULERS, schedule_round
 
 TASK_TYPES = [str(i) for i in CheckerMethod]
 
@@ -296,6 +296,7 @@ class CheckerClient:
         round_time: int | None = None,
         concurrency: int = 4,
         jitter: bool = True,
+        scheduler: str = DEFAULT_SCHEDULER,
     ) -> None:
         assert self._connected, "Client is not connected (did you forget `async with`)?"
 
@@ -358,28 +359,23 @@ class CheckerClient:
                 )
             return
 
-        # Schedule the round on the task_scheduler round-grid EDF sampler:
-        # task duration/min put->get gap K = timeout, horizon M = round_time,
-        # max concurrent requests C = concurrency. Sub-round jitter keeps
-        # exact timings unpredictable, same as the gameserver runner.
-        problem = Problem(
+        # Schedule the round: task duration/min put->get gap K = timeout,
+        # horizon M = round_time. See enochecker_cli.scheduling for the
+        # available algorithms and how each treats concurrency/jitter.
+        sched = schedule_round(
+            scheduler,
             n=len(tasks),
-            edges=tuple(edges),
+            edges=edges,
             m=round_time,
             k=self.timeout,
             c=concurrency,
+            jitter=jitter,
         )
-        v = verify(problem)
-        if not v.feasible:
-            raise ValueError(
-                f"cannot fit round in round_time={round_time}s: {v.reason}"
-            )
-        sched = sample_schedule(problem, jitter=jitter, verified=v)
 
         round_start = time.monotonic()
 
         async def run_task(i: int, op, args: list) -> None:
-            target = round_start + sched.start_slot[i]
+            target = round_start + sched.start_offset[i]
             now = time.monotonic()
             if now < target:
                 await asyncio.sleep(target - now)
@@ -408,6 +404,7 @@ async def run_sim(
     round_time: int | None,
     concurrency: int,
     jitter: bool,
+    scheduler: str,
 ):
     url = f"http://{checker_address}:{checker_port}"
     async with CheckerClient(
@@ -422,7 +419,7 @@ async def run_sim(
         if round_time is not None:
             print(
                 f"\x1b[31;1mround-time\x1b[0m:   {round_time}s "
-                f"(scheduler: K={timeout}s, C={concurrency}, jitter={jitter})"
+                f"(scheduler: {scheduler}, K={timeout}s, C={concurrency}, jitter={jitter})"
             )
 
         round_id_base = random.randint(0, 10000000000)
@@ -439,6 +436,7 @@ async def run_sim(
                     round_time=round_time,
                     concurrency=concurrency,
                     jitter=jitter,
+                    scheduler=scheduler,
                 )
                 progress.update(task, advance=1)
                 round_id += 1
@@ -812,10 +810,19 @@ def main() -> None:
         type=int,
         default=None,
         metavar="SECONDS",
-        help="spread each round's tasks across the round using the task "
-        "scheduler (round-grid EDF with sub-round jitter); putflag/putnoise "
-        "are scheduled at least `--timeout` seconds before their "
-        "corresponding getflag/getnoise so they never race",
+        help="spread each round's tasks across the round using --scheduler; "
+        "putflag/putnoise are scheduled at least `--timeout` seconds before "
+        "their corresponding getflag/getnoise so they never race",
+    )
+    sim_parser.add_argument(
+        "--scheduler",
+        choices=sorted(SCHEDULERS),
+        default=DEFAULT_SCHEDULER,
+        help="algorithm used to place tasks within the round when "
+        f"--round-time is set (default: {DEFAULT_SCHEDULER}); 'edf' is the "
+        "round-grid EDF sampler with an exact --concurrency cap, 'phase' is "
+        "the earlier put/get/unconstrained-window scheduler it replaced "
+        "(no concurrency cap; see enochecker_cli.scheduling)",
     )
     sim_parser.add_argument(
         "--concurrency",
@@ -823,7 +830,7 @@ def main() -> None:
         default=4,
         metavar="C",
         help="max concurrent checker requests per round when --round-time "
-        "is set (default: 4)",
+        "is set with --scheduler edf (default: 4)",
     )
     sim_parser.add_argument(
         "--jitter",
@@ -886,6 +893,7 @@ def main() -> None:
                 round_time=args.round_time,
                 concurrency=args.concurrency,
                 jitter=args.jitter,
+                scheduler=args.scheduler,
             )
         )
     else:
