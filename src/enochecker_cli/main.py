@@ -28,6 +28,8 @@ from enochecker_core import (
     CheckerTaskResult,
 )
 
+from enochecker_cli.scheduling import DEFAULT_SCHEDULER, SCHEDULERS, schedule_round
+
 TASK_TYPES = [str(i) for i in CheckerMethod]
 
 
@@ -292,78 +294,97 @@ class CheckerClient:
         multiplier: int,
         exploiters: int,
         round_time: int | None = None,
+        concurrency: int = 4,
+        jitter: bool = True,
+        scheduler: str = DEFAULT_SCHEDULER,
     ) -> None:
         assert self._connected, "Client is not connected (did you forget `async with`)?"
 
-        put: list[tuple] = [
-            (self.putflag, variant_id, repeat)
-            for variant_id in range(self.flag_variants)
-            for repeat in range(multiplier)
-        ] + [
-            (self.putnoise, variant_id, repeat)
-            for variant_id in range(self.noise_variants)
-            for repeat in range(multiplier)
-        ]
+        # tasks[i] = (op, *args); edges are (put_index, get_index) so the
+        # scheduler never starts a get before its put has had `timeout`
+        # seconds to complete.
+        tasks: list[tuple] = []
+        edges: list[tuple[int, int]] = []
+        putflag_zero: list[int] = []  # putflag(variant, repeat=0) indices
 
-        get: list[tuple] = (
-            [
-                (self.getflag, variant_id, repeat)
-                for variant_id in range(self.flag_variants)
-                for repeat in range(multiplier)
-            ]
-            + [
-                (self.getnoise, variant_id, repeat)
-                for variant_id in range(self.noise_variants)
-                for repeat in range(multiplier)
-            ]
-            + [
-                (self.havoc, variant_id, repeat)
-                for variant_id in range(self.havoc_variants)
-                for repeat in range(multiplier)
-            ]
-            + [
-                (self.exploit, variant_id, team)
-                for variant_id in range(self.exploit_variants)
-                for team in range(exploiters)
-            ]
-        )
+        for variant_id in range(self.flag_variants):
+            for repeat in range(multiplier):
+                put_i = len(tasks)
+                tasks.append((self.putflag, variant_id, repeat))
+                if repeat == 0:
+                    putflag_zero.append(put_i)
+                get_i = len(tasks)
+                tasks.append((self.getflag, variant_id, repeat))
+                edges.append((put_i, get_i))
+
+        for variant_id in range(self.noise_variants):
+            for repeat in range(multiplier):
+                put_i = len(tasks)
+                tasks.append((self.putnoise, variant_id, repeat))
+                get_i = len(tasks)
+                tasks.append((self.getnoise, variant_id, repeat))
+                edges.append((put_i, get_i))
+
+        for variant_id in range(self.havoc_variants):
+            for repeat in range(multiplier):
+                tasks.append((self.havoc, variant_id, repeat))
+
+        # exploit() reads this round's putflag(fid, repeat=0) flag (see
+        # exploit() above) before it has learned which variant works, so it
+        # must not be scheduled before those puts land.
+        for variant_id in range(self.exploit_variants):
+            for team in range(exploiters):
+                exploit_i = len(tasks)
+                tasks.append((self.exploit, variant_id, team))
+                for put_i in putflag_zero:
+                    edges.append((put_i, exploit_i))
 
         if round_time is None:
+            # No horizon to schedule against: just respect dependency order
+            # (predecessors before dependents) with two unbounded phases,
+            # same as the old hand-rolled put-then-get split.
+            has_incoming = {b for _, b in edges}
+            phase1 = [i for i in range(len(tasks)) if i not in has_incoming]
+            phase2 = [i for i in range(len(tasks)) if i in has_incoming]
             self.add_log_entries(
-                await asyncio.gather(*[op(round_id, *args) for op, *args in put])
+                await asyncio.gather(
+                    *[tasks[i][0](round_id, *tasks[i][1:]) for i in phase1]
+                )
             )
-            self.add_log_entries(
-                await asyncio.gather(*[op(round_id, *args) for op, *args in get])
-            )
-            return
-
-        # Split the round into `timeout`-long phases. Puts occupy the first
-        # half so gets in later phases are guaranteed to start after the
-        # corresponding put has either completed or timed out.
-        n_phases = max(2, round_time // self.timeout)
-        n_put_phases = n_phases // 2
-        n_get_phases = n_phases - n_put_phases
-
-        def chunkify(items: list[tuple], n: int) -> list[list[tuple]]:
-            chunks: list[list[tuple]] = [[] for _ in range(n)]
-            for i, item in enumerate(items):
-                chunks[i % n].append(item)
-            return chunks
-
-        phases = chunkify(put, n_put_phases) + chunkify(get, n_get_phases)
-
-        round_start = time.monotonic()
-        for i, phase_tasks in enumerate(phases):
-            phase_start = round_start + i * self.timeout
-            now = time.monotonic()
-            if now < phase_start:
-                await asyncio.sleep(phase_start - now)
-            if phase_tasks:
+            if phase2:
                 self.add_log_entries(
                     await asyncio.gather(
-                        *[op(round_id, *args) for op, *args in phase_tasks]
+                        *[tasks[i][0](round_id, *tasks[i][1:]) for i in phase2]
                     )
                 )
+            return
+
+        # Schedule the round: task duration/min put->get gap K = timeout,
+        # horizon M = round_time. See enochecker_cli.scheduling for the
+        # available algorithms and how each treats concurrency/jitter.
+        sched = schedule_round(
+            scheduler,
+            n=len(tasks),
+            edges=edges,
+            m=round_time,
+            k=self.timeout,
+            c=concurrency,
+            jitter=jitter,
+        )
+
+        round_start = time.monotonic()
+
+        async def run_task(i: int, op, args: list) -> None:
+            target = round_start + sched.start_offset[i]
+            now = time.monotonic()
+            if now < target:
+                await asyncio.sleep(target - now)
+            self.add_log_entries([await op(round_id, *args)])
+
+        await asyncio.gather(
+            *[run_task(i, op, args) for i, (op, *args) in enumerate(tasks)]
+        )
+
         remaining = round_start + round_time - time.monotonic()
         if remaining > 0:
             await asyncio.sleep(remaining)
@@ -381,6 +402,9 @@ async def run_sim(
     timeout: int,
     seed: int,
     round_time: int | None,
+    concurrency: int,
+    jitter: bool,
+    scheduler: str,
 ):
     url = f"http://{checker_address}:{checker_port}"
     async with CheckerClient(
@@ -393,9 +417,9 @@ async def run_sim(
         print(f"\x1b[31;1mexploiters\x1b[0m:   {exploiters}")
         print(f"\x1b[31;1mmultiplier\x1b[0m:   {multiplier}")
         if round_time is not None:
-            n_phases = max(2, round_time // timeout)
             print(
-                f"\x1b[31;1mround-time\x1b[0m:   {round_time}s ({n_phases} phases of {timeout}s)"
+                f"\x1b[31;1mround-time\x1b[0m:   {round_time}s "
+                f"(scheduler: {scheduler}, K={timeout}s, C={concurrency}, jitter={jitter})"
             )
 
         round_id_base = random.randint(0, 10000000000)
@@ -410,6 +434,9 @@ async def run_sim(
                     multiplier,
                     exploiters,
                     round_time=round_time,
+                    concurrency=concurrency,
+                    jitter=jitter,
+                    scheduler=scheduler,
                 )
                 progress.update(task, advance=1)
                 round_id += 1
@@ -783,9 +810,34 @@ def main() -> None:
         type=int,
         default=None,
         metavar="SECONDS",
-        help="spread each round's tasks across phases of `--timeout` seconds; "
-        "puts run in the first half of phases and gets in the second half so "
-        "getflag/getnoise never race their corresponding put",
+        help="spread each round's tasks across the round using --scheduler; "
+        "putflag/putnoise are scheduled at least `--timeout` seconds before "
+        "their corresponding getflag/getnoise so they never race",
+    )
+    sim_parser.add_argument(
+        "--scheduler",
+        choices=sorted(SCHEDULERS),
+        default=DEFAULT_SCHEDULER,
+        help="algorithm used to place tasks within the round when "
+        f"--round-time is set (default: {DEFAULT_SCHEDULER}); 'edf' is the "
+        "round-grid EDF sampler with an exact --concurrency cap, 'phase' is "
+        "the earlier put/get/unconstrained-window scheduler it replaced "
+        "(no concurrency cap; see enochecker_cli.scheduling)",
+    )
+    sim_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=4,
+        metavar="C",
+        help="max concurrent checker requests per round when --round-time "
+        "is set with --scheduler edf (default: 4)",
+    )
+    sim_parser.add_argument(
+        "--jitter",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="randomize sub-round start offsets so timings stay "
+        "unpredictable when --round-time is set (default: yes)",
     )
 
     args = parser.parse_args()
@@ -839,6 +891,9 @@ def main() -> None:
                 timeout=args.timeout,
                 seed=args.seed,
                 round_time=args.round_time,
+                concurrency=args.concurrency,
+                jitter=args.jitter,
+                scheduler=args.scheduler,
             )
         )
     else:
