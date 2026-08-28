@@ -92,6 +92,6 @@ conflicts = [
 
 [tool.uv.sources]
 enochecker-core = [
-	{ git = "https://github.com/attacking-lab/enochecker-core", rev = "v0.11.1", group = "prod" },
+	{ git = "https://git.atklab.cloud/atklab/enochecker-core", rev = "v0.11.1", group = "prod" },
 	{ path = "lib/.enochecker-core", editable = true, extra = "dev" }
 ]
