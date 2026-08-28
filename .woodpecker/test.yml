@@ -23,12 +23,21 @@
 # fetch -- the same "-u oauth2" pattern atklab/gameserver's justfile/
 # Dockerfile use for its own ENOCHECKER_TOKEN. format/lint/mypy/test
 # have no dependencies on each other, so Woodpecker runs them
-# concurrently via its depends_on DAG mode.
+# concurrently via its depends_on DAG mode, each doing its own `uv sync`
+# under the hood -- UV_CACHE_DIR/UV_PYTHON_INSTALL_DIR below point into
+# the workspace volume Woodpecker shares across a pipeline's steps, so
+# the four steps split the download cost of enochecker-core and friends
+# instead of each paying it independently (mirrors atklab/enochecker3's
+# test.yml, though this image already bakes in Python so
+# UV_PYTHON_INSTALL_DIR mostly future-proofs against that changing).
+# `--no-config` replaces the deprecated `--isolated` in UV_FLAGS.
 
 variables:
   - &ci_image oci.atklab.cloud/enochecker-cli/enochecker-cli-ci:latest
   - &env
-    UV_FLAGS: "--exact --isolated --frozen"
+    UV_FLAGS: "--exact --no-config --frozen"
+    UV_CACHE_DIR: /woodpecker/.uv-cache
+    UV_PYTHON_INSTALL_DIR: /woodpecker/.uv-python
     CHECKER_PULL_TOKEN:
       from_secret: CHECKER_PULL_TOKEN
 
