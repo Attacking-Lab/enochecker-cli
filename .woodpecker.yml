@@ -16,14 +16,15 @@ steps:
       CI_PAT:
         from_secret: CI_PAT
     commands:
-      - apt-get update -y && apt-get install -y --no-install-recommends make git
+      - apt-get update -y && apt-get install -y --no-install-recommends git curl
+      - curl --proto '=https' -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
       - python -m pip install uv==0.8.5
       # dependency-groups.prod (enochecker-core) is fetched from a private
       # GitHub repo; authenticate uv's git fetch with a PAT.
       - git config --global url."https://${CI_PAT}@github.com/".insteadOf "https://github.com/"
-      - make --trace format
-      - make --trace lint
-      - make --trace mypy
-      - make --trace test
-      - make --trace build
+      - just -v format
+      - just -v lint
+      - just -v mypy
+      - just -v test
+      - just -v build
       - pip install dist/enochecker_cli-*.tar.gz
