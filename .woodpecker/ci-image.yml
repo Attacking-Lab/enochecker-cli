@@ -1,0 +1,44 @@
+# Builds and pushes .woodpecker/Dockerfile. Split out of the combined
+# ci.yaml (see .woodpecker/test.yml for the rest of that split) so it
+# only runs when the Dockerfile actually changed (`when.path` below)
+# and only from push/manual, never pull_request/tag -- test.yml
+# depends on this workflow with `optional: true` so it still runs
+# unmodified whenever this one is skipped, and `pull: true` on its
+# steps so a run that *did* rebuild the image picks up the fresh
+# `:latest` instead of a stale cached copy. Mirrors
+# atklab/enochecker3's .woodpecker/ci-image.yml split.
+#
+# Narrowed to push/manual (rather than test.yml's push/pull_request/
+# manual/tag) because it pushes to the registry with the
+# REGISTRY_USERNAME/REGISTRY_PASSWORD secrets below -- same choice
+# atklab/enochecker3 made, to avoid a registry push running off a
+# pull_request or tag event.
+#
+# Uses the woodpeckerci/plugin-docker-buildx plugin rather than a
+# hand-rolled docker:dind build+push, matching atklab/gameserver's
+# .woodpecker/build.yaml. This agent runs steps under the sysbox
+# runtime, which lets the plugin's own nested dockerd run unprivileged
+# here too -- no `privileged: true` needed.
+#
+# Woodpecker's own per-repo "Registries" credentials are pull-only and
+# never exposed to steps, so they can't authenticate this push -- it
+# needs the REGISTRY_USERNAME/REGISTRY_PASSWORD secrets provisioned
+# out of band instead (same names as gameserver's publish-* steps).
+
+when:
+  - event: [push, manual]
+    path: .woodpecker/Dockerfile
+
+steps:
+  - name: ci-image
+    image: woodpeckerci/plugin-docker-buildx
+    settings:
+      dockerfile: .woodpecker/Dockerfile
+      context: .
+      repo: oci.atklab.cloud/enochecker-cli/enochecker-cli-ci
+      registry: oci.atklab.cloud
+      tags: latest
+      username:
+        from_secret: REGISTRY_USERNAME
+      password:
+        from_secret: REGISTRY_PASSWORD

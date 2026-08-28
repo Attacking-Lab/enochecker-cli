@@ -1,0 +1,69 @@
+# format/lint/mypy/test, split out of the combined ci.yaml (see
+# .woodpecker/ci-image.yml for the image build+push half of that
+# split) and templated with YAML anchors for the shared image ref and
+# environment instead of repeating them per step -- mirrors
+# atklab/enochecker3's .woodpecker/test.yml split+templating.
+#
+# Kept on push/pull_request/manual/tag (enochecker3's test.yml is
+# push/manual only) since this repo already ran tests on PRs and tags
+# before the split and nothing about the split changes that.
+#
+# Declares a workflow-level `depends_on: [ci-image]` (optional: true,
+# so this workflow still runs unmodified when ci-image.yml is skipped
+# because the Dockerfile didn't change) instead of the previous
+# per-step dependency, since ci-image is now a separate workflow
+# rather than a step in this same file. `pull: true` on every step
+# below picks up a freshly rebuilt `:latest` instead of a stale cached
+# copy on runs where ci-image.yml did rebuild it.
+#
+# enochecker-core is a private git dependency (see pyproject.toml's
+# [tool.uv.sources], pinned at git.atklab.cloud/atklab/enochecker-core),
+# so every step needs the CHECKER_PULL_TOKEN secret, passed through
+# git-pass-helper (baked into the CI image) to authenticate `uv`'s
+# fetch -- the same "-u oauth2" pattern atklab/gameserver's justfile/
+# Dockerfile use for its own ENOCHECKER_TOKEN. format/lint/mypy/test
+# have no dependencies on each other, so Woodpecker runs them
+# concurrently via its depends_on DAG mode.
+
+variables:
+  - &ci_image oci.atklab.cloud/enochecker-cli/enochecker-cli-ci:latest
+  - &env
+    UV_FLAGS: "--exact --isolated --frozen"
+    CHECKER_PULL_TOKEN:
+      from_secret: CHECKER_PULL_TOKEN
+
+when:
+  - event: [push, pull_request, manual, tag]
+
+depends_on:
+  - name: ci-image
+    optional: true
+
+steps:
+  - name: format
+    image: *ci_image
+    pull: true
+    environment: *env
+    commands:
+      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v format
+
+  - name: lint
+    image: *ci_image
+    pull: true
+    environment: *env
+    commands:
+      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v lint
+
+  - name: mypy
+    image: *ci_image
+    pull: true
+    environment: *env
+    commands:
+      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v mypy
+
+  - name: test
+    image: *ci_image
+    pull: true
+    environment: *env
+    commands:
+      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v test
