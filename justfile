@@ -65,14 +65,6 @@ test:
 sync:
     @uv sync {{ UV_FLAGS }}
 
-# Wire up the local enochecker-core submodule for development
-[group('dev')]
-dev:
-    @git update-index --assume-unchanged lib/.enochecker-core/pyproject.toml
-    @rm -rf lib/.enochecker-core
-    @ln -s enochecker-core lib/.enochecker-core
-    @git submodule update --init --recursive lib/enochecker-core
-
 # Build the Woodpecker CI runner image
 [group('build')]
 ci-image-build:
