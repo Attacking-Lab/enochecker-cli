@@ -3,6 +3,11 @@ unexport VIRTUAL_ENV
 UV_FLAGS := env('UV_FLAGS', '--inexact --no-group prod --group dev --all-extras')
 UV_RUN := 'env VIRTUAL_ENV=.venv uv run ' + UV_FLAGS
 
+# Image built from .woodpecker/Dockerfile for the Woodpecker CI pipeline
+CI_IMAGE := env('CI_IMAGE', 'oci.atklab.cloud/enochecker-cli/enochecker-cli-ci')
+CI_IMAGE_TAG := env('CI_IMAGE_TAG', 'latest')
+CI_IMAGE_REF := CI_IMAGE + ':' + CI_IMAGE_TAG
+
 [private]
 default:
     @just --list
@@ -60,10 +65,12 @@ test:
 sync:
     @uv sync {{ UV_FLAGS }}
 
-# Wire up the local enochecker-core submodule for development
-[group('dev')]
-dev:
-    @git update-index --assume-unchanged lib/.enochecker-core/pyproject.toml
-    @rm -rf lib/.enochecker-core
-    @ln -s enochecker-core lib/.enochecker-core
-    @git submodule update --init --recursive lib/enochecker-core
+# Build the Woodpecker CI runner image
+[group('build')]
+ci-image-build:
+    docker build -f .woodpecker/Dockerfile -t {{ CI_IMAGE_REF }} .
+
+# Build and push the Woodpecker CI runner image
+[group('build')]
+ci-image-push: ci-image-build
+    docker push {{ CI_IMAGE_REF }}

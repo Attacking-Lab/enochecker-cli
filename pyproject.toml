@@ -57,11 +57,6 @@ typing = [
 	"types-requests>=2.31.0.1",
 ]
 
-[project.optional-dependencies]
-dev = [
-	"enochecker-core",
-]
-
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
@@ -83,15 +78,6 @@ ignore_missing_imports = true
 
 [tool.uv]
 default-groups = ["prod"]
-conflicts = [
-	[
-		{ group = "prod" },
-		{ extra = "dev" }
-	],
-]
 
 [tool.uv.sources]
-enochecker-core = [
-	{ git = "https://github.com/attacking-lab/enochecker-core", rev = "v0.11.1", group = "prod" },
-	{ path = "lib/.enochecker-core", editable = true, extra = "dev" }
-]
+enochecker-core = { git = "https://git.atklab.cloud/atklab/enochecker-core", rev = "v0.11.1", group = "prod" }
