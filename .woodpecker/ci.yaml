@@ -1,0 +1,116 @@
+# Builds a Woodpecker CI runner image (.woodpecker/Dockerfile) and reuses
+# it across format/lint/mypy/test/build instead of installing uv/just/
+# git-pass-helper fresh in every step -- mirrors atklab/enochecker-exploit's
+# .woodpecker/ci.yaml split (see issue #6). Runs once, against Python 3.13
+# (the .woodpecker/Dockerfile's base, and the newest of this project's
+# supported versions, 3.10-3.13) instead of the previous PYTHON_VERSION
+# matrix -- Woodpecker has no lightweight way to reuse one image across a
+# version matrix without either building N images or installing N Python
+# interpreters into one, the same one-version tradeoff enochecker-exploit
+# made for the same reason. This trades away CI coverage of 3.10-3.12;
+# `uv run --python <version>` still exercises any of them locally if that
+# coverage is needed again.
+#
+# enochecker-core is fetched from the private git.atklab.cloud/atklab/
+# enochecker-core repo (see pyproject.toml's [tool.uv.sources]). Every
+# step below needs the CHECKER_PULL_TOKEN secret, passed through
+# git-pass-helper (baked into the CI image) to authenticate that fetch --
+# the same "-u oauth2" pattern atklab/gameserver's justfile/Dockerfile use
+# for its own ENOCHECKER_TOKEN.
+#
+# `ci-image` builds and pushes .woodpecker/Dockerfile itself (same as the
+# justfile's ci-image-build/ci-image-push recipes, run by hand) and only
+# runs when that file changed (`when.path`); format/lint/mypy/test/build
+# depend on it with `optional: true` so they still run when it's skipped,
+# and set `pull: true` so a pipeline that did rebuild the image picks up
+# the fresh `:latest` instead of a stale cached copy.
+#
+# This agent runs steps under the sysbox runtime, which lets a plain,
+# unprivileged `docker:dind` step run its own nested dockerd safely -- no
+# `privileged: true`, no "trusted repo" project setting, no separate dind
+# service reached over a DOCKER_HOST TCP socket.
+#
+# Pushing to oci.atklab.cloud authenticates via oci.atklab.cloud being
+# registered as a registry in this repo's Woodpecker project settings
+# (provisioned out of band, by @sinitax) rather than a secrets-driven
+# `docker login` here -- same as enochecker-exploit.
+
+when:
+  - event: [push, pull_request, manual, tag]
+
+steps:
+  ci-image:
+    image: docker:dind
+    commands:
+      - dockerd-entrypoint.sh &
+      - timeout 30 sh -c 'until docker info >/dev/null 2>&1; do sleep 1; done'
+      - docker build -f .woodpecker/Dockerfile -t oci.atklab.cloud/enochecker-cli/enochecker-cli-ci:latest .
+      - docker push oci.atklab.cloud/enochecker-cli/enochecker-cli-ci:latest
+    when:
+      - path: .woodpecker/Dockerfile
+
+  format:
+    image: oci.atklab.cloud/enochecker-cli/enochecker-cli-ci:latest
+    pull: true
+    environment:
+      UV_FLAGS: "--exact --isolated --frozen"
+      CHECKER_PULL_TOKEN:
+        from_secret: CHECKER_PULL_TOKEN
+    depends_on:
+      - name: ci-image
+        optional: true
+    commands:
+      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v format
+
+  lint:
+    image: oci.atklab.cloud/enochecker-cli/enochecker-cli-ci:latest
+    pull: true
+    environment:
+      UV_FLAGS: "--exact --isolated --frozen"
+      CHECKER_PULL_TOKEN:
+        from_secret: CHECKER_PULL_TOKEN
+    depends_on:
+      - name: ci-image
+        optional: true
+    commands:
+      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v lint
+
+  mypy:
+    image: oci.atklab.cloud/enochecker-cli/enochecker-cli-ci:latest
+    pull: true
+    environment:
+      UV_FLAGS: "--exact --isolated --frozen"
+      CHECKER_PULL_TOKEN:
+        from_secret: CHECKER_PULL_TOKEN
+    depends_on:
+      - name: ci-image
+        optional: true
+    commands:
+      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v mypy
+
+  test:
+    image: oci.atklab.cloud/enochecker-cli/enochecker-cli-ci:latest
+    pull: true
+    environment:
+      UV_FLAGS: "--exact --isolated --frozen"
+      CHECKER_PULL_TOKEN:
+        from_secret: CHECKER_PULL_TOKEN
+    depends_on:
+      - name: ci-image
+        optional: true
+    commands:
+      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v test
+
+  build:
+    image: oci.atklab.cloud/enochecker-cli/enochecker-cli-ci:latest
+    pull: true
+    environment:
+      UV_FLAGS: "--exact --isolated --frozen"
+      CHECKER_PULL_TOKEN:
+        from_secret: CHECKER_PULL_TOKEN
+    depends_on:
+      - name: ci-image
+        optional: true
+    commands:
+      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v build
+      - pip install dist/enochecker_cli-*.tar.gz
