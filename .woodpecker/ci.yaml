@@ -25,27 +25,34 @@
 # and set `pull: true` so a pipeline that did rebuild the image picks up
 # the fresh `:latest` instead of a stale cached copy.
 #
-# This agent runs steps under the sysbox runtime, which lets a plain,
-# unprivileged `docker:dind` step run its own nested dockerd safely -- no
-# `privileged: true`, no "trusted repo" project setting, no separate dind
-# service reached over a DOCKER_HOST TCP socket.
+# `ci-image` uses the woodpeckerci/plugin-docker-buildx plugin instead of
+# hand-rolled docker:dind build+push commands, matching atklab/gameserver's
+# .woodpecker/build.yaml. This agent runs steps under the sysbox runtime,
+# which lets the plugin's own nested dockerd run unprivileged here too --
+# no `privileged: true` needed.
 #
-# Pushing to oci.atklab.cloud authenticates via oci.atklab.cloud being
-# registered as a registry in this repo's Woodpecker project settings
-# (provisioned out of band, by @sinitax) rather than a secrets-driven
-# `docker login` here -- same as enochecker-exploit.
+# Unlike the previous docker:dind commands (which relied on oci.atklab.cloud
+# being registered as a registry in this repo's Woodpecker project
+# settings), the buildx plugin authenticates itself and needs explicit
+# REGISTRY_USERNAME/REGISTRY_PASSWORD secrets -- it doesn't read that
+# project-level registry setting. Same secret names as gameserver's
+# publish-controlpanel/publish-submission steps.
 
 when:
   - event: [push, pull_request, manual, tag]
 
 steps:
   ci-image:
-    image: docker:dind
-    commands:
-      - dockerd-entrypoint.sh &
-      - timeout 30 sh -c 'until docker info >/dev/null 2>&1; do sleep 1; done'
-      - docker build -f .woodpecker/Dockerfile -t oci.atklab.cloud/enochecker-cli/enochecker-cli-ci:latest .
-      - docker push oci.atklab.cloud/enochecker-cli/enochecker-cli-ci:latest
+    image: woodpeckerci/plugin-docker-buildx
+    settings:
+      registry: oci.atklab.cloud
+      repo: oci.atklab.cloud/enochecker-cli/enochecker-cli-ci
+      dockerfile: .woodpecker/Dockerfile
+      tags: latest
+      username:
+        from_secret: REGISTRY_USERNAME
+      password:
+        from_secret: REGISTRY_PASSWORD
     when:
       - path: .woodpecker/Dockerfile
 
