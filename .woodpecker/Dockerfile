@@ -1,11 +1,11 @@
-# Woodpecker CI runner image for .woodpecker/ci.yaml. Bundles git, uv,
+# Woodpecker CI runner image for .woodpecker/test.yml. Bundles git, uv,
 # just and git-pass-helper (needed to authenticate uv's fetch of the
 # private enochecker-core git dependency via git.atklab.cloud) on top of
 # a plain Python image, so a run pays for this setup once, at image
 # build time, instead of on every push. Built and pushed automatically
-# by .woodpecker/ci.yaml's own `ci-image` step whenever this file
-# changes (see the justfile's ci-image-build/ci-image-push recipes for
-# the equivalent by-hand commands, still useful for local testing).
+# by .woodpecker/ci-image.yml whenever this file changes (see the
+# justfile's ci-image-build/ci-image-push recipes for the equivalent
+# by-hand commands, still useful for local testing).
 # Modelled on atklab/enochecker-exploit's .woodpecker/Dockerfile.
 FROM python:3.13-slim-bookworm
 
