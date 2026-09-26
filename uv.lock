@@ -220,7 +220,7 @@ wheels = [
 
 [[package]]
 name = "enochecker-cli"
-version = "1.2.0"
+version = "0.18.2"
 source = { editable = "." }
 dependencies = [
     { name = "docker" },
@@ -244,7 +244,7 @@ lint = [
     { name = "ruff" },
 ]
 prod = [
-    { name = "enochecker-core", version = "0.11.0", source = { git = "https://git.atklab.cloud/atklab/enochecker-core?rev=v0.11.1#5b5d705adbe9163f8c36c8aef09f4b2de229e9d2" } },
+    { name = "enochecker-core" },
 ]
 test = [
     { name = "coverage" },
@@ -274,7 +274,7 @@ dev = [
 ]
 format = [{ name = "ruff", specifier = ">=0.12.9" }]
 lint = [{ name = "ruff", specifier = ">=0.12.9" }]
-prod = [{ name = "enochecker-core", git = "https://git.atklab.cloud/atklab/enochecker-core?rev=v0.11.1" }]
+prod = [{ name = "enochecker-core", git = "https://git.atklab.cloud/atklab/enochecker-core?rev=v0.18.2" }]
 test = [
     { name = "coverage", specifier = ">=7.10.4" },
     { name = "pytest", specifier = ">=8.4.1" },
@@ -287,8 +287,8 @@ typing = [
 
 [[package]]
 name = "enochecker-core"
-version = "0.11.0"
-source = { git = "https://git.atklab.cloud/atklab/enochecker-core?rev=v0.11.1#5b5d705adbe9163f8c36c8aef09f4b2de229e9d2" }
+version = "0.18.2"
+source = { git = "https://git.atklab.cloud/atklab/enochecker-core?rev=v0.18.2#a9a3727d65cb518021c3ae68bd76f8fb66481d12" }
 dependencies = [
     { name = "pydantic" },
 ]

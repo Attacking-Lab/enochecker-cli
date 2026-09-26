@@ -1,7 +1,6 @@
 import argparse
 import dataclasses
 import hashlib
-from collections import defaultdict
 from io import TextIOWrapper
 import random
 import pathlib
@@ -76,13 +75,14 @@ class CheckerClient:
         self._flags: dict[int, dict[tuple[int, int], tuple[str, str | None]]] = (
             collections.defaultdict(dict)
         )
-        self._exploit_variants: dict[int, set] = defaultdict(lambda: set())
         self.timeout = timeout
 
         self.flag_variants = 0
         self.noise_variants = 0
         self.havoc_variants = 0
-        self.exploit_variants = 0
+        # Indexed by exploit variant id, each entry is the flag variant it targets
+        self.exploit_variants: list[int] = []
+        self.test_variants = 0
         self.service_name = ""
 
     async def __aenter__(self) -> Self:
@@ -100,6 +100,7 @@ class CheckerClient:
         self.noise_variants = metadata.noise_variants
         self.havoc_variants = metadata.havoc_variants
         self.exploit_variants = metadata.exploit_variants
+        self.test_variants = metadata.test_variants
         self.service_name = metadata.service_name
         self._connected = True
         return self
@@ -152,7 +153,8 @@ class CheckerClient:
                 f"\x1b[32;1mflag stores\x1b[0m:  {self.flag_variants}",
                 f"\x1b[33;1mnoise checks\x1b[0m: {self.noise_variants}",
                 f"\x1b[33;1mhavoc checks\x1b[0m: {self.havoc_variants}",
-                f"\x1b[31;1mexploits\x1b[0m:     {self.exploit_variants}",
+                f"\x1b[31;1mexploits\x1b[0m:     {len(self.exploit_variants)}",
+                f"\x1b[33;1mtests\x1b[0m:        {self.test_variants}",
             ]
         )
 
@@ -254,39 +256,41 @@ class CheckerClient:
         _, duration = await self._request(message)
         return LogEntry(round_id, "havoc", variant_id, None, duration, repeat)
 
-    async def exploit(
-        self, round_id: int, variant_id: int, source_team: int
-    ) -> LogEntry:
-        flag_ids = list(self._exploit_variants[variant_id])
-        if flag_ids == []:
-            assert self._connected, (
-                "Client is not connected (did you forget `async with`)?"
-            )
-            flag_ids = list(range(self.flag_variants))
+    async def test(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
+        message = self._build_request(
+            method=CheckerMethod.TEST,
+            round_id=round_id,
+            flag=None,
+            variant_id=variant_id,
+            attack_info=None,
+            repeat=repeat,
+        )
+        _, duration = await self._request(message)
+        return LogEntry(round_id, "test", variant_id, None, duration, repeat)
 
-        for flag_id in flag_ids:
-            # Always try to get the flag for repetition 0.
-            # TODO: If the multiplier is higher, we can pick randomly here.
-            flag, attack_info = self._flags[round_id][(flag_id, 0)]
-            message = self._build_request(
-                method=CheckerMethod.EXPLOIT,
-                round_id=round_id,
-                flag=flag,
-                variant_id=variant_id,
-                attack_info=attack_info,
+    async def exploit(
+        self, round_id: int, variant_id: int, source_team: int, repeat: int = 0
+    ) -> LogEntry:
+        flag_variant_id = self.exploit_variants[variant_id]
+        flag, attack_info = self._flags[round_id][(flag_variant_id, repeat)]
+        message = self._build_request(
+            method=CheckerMethod.EXPLOIT,
+            round_id=round_id,
+            flag=flag,
+            variant_id=variant_id,
+            attack_info=attack_info,
+            repeat=repeat,
+        )
+        result, duration = await self._request(message)
+        if CheckerTaskResult(result.result) == CheckerTaskResult.OK:
+            assert result.flag == flag, (
+                f"exploit {variant_id} returned {result.flag}, expected {flag}"
             )
-            result, duration = await self._request(message)
-            if CheckerTaskResult(result.result) == CheckerTaskResult.OK:
-                if result.flag == flag:
-                    self._exploit_variants[variant_id].add(flag_id)
-            else:
-                assert result.message in ("No flags found", "Flag not found"), (
-                    result.message
-                )
-            return LogEntry(
-                round_id, "exploit", variant_id, source_team, duration, flag_id
+        else:
+            assert result.message in ("No flags found", "Flag not found"), (
+                result.message
             )
-        assert False, f"No flag for any flag ID for exploit {variant_id}"
+        return LogEntry(round_id, "exploit", variant_id, source_team, duration, repeat)
 
     async def simulate_round(
         self,
@@ -305,14 +309,14 @@ class CheckerClient:
         # seconds to complete.
         tasks: list[tuple] = []
         edges: list[tuple[int, int]] = []
-        putflag_zero: list[int] = []  # putflag(variant, repeat=0) indices
+        putflag_zero: dict[int, int] = {}  # flag variant -> putflag(repeat=0) index
 
         for variant_id in range(self.flag_variants):
             for repeat in range(multiplier):
                 put_i = len(tasks)
                 tasks.append((self.putflag, variant_id, repeat))
                 if repeat == 0:
-                    putflag_zero.append(put_i)
+                    putflag_zero[variant_id] = put_i
                 get_i = len(tasks)
                 tasks.append((self.getflag, variant_id, repeat))
                 edges.append((put_i, get_i))
@@ -329,15 +333,14 @@ class CheckerClient:
             for repeat in range(multiplier):
                 tasks.append((self.havoc, variant_id, repeat))
 
-        # exploit() reads this round's putflag(fid, repeat=0) flag (see
-        # exploit() above) before it has learned which variant works, so it
-        # must not be scheduled before those puts land.
-        for variant_id in range(self.exploit_variants):
+        # exploit() reads this round's putflag(repeat=0) flag of the flag
+        # variant it targets (see exploit() above), so it must not be
+        # scheduled before that put lands.
+        for variant_id, flag_variant_id in enumerate(self.exploit_variants):
             for team in range(exploiters):
                 exploit_i = len(tasks)
                 tasks.append((self.exploit, variant_id, team))
-                for put_i in putflag_zero:
-                    edges.append((put_i, exploit_i))
+                edges.append((putflag_zero[flag_variant_id], exploit_i))
 
         if round_time is None:
             # No horizon to schedule against: just respect dependency order
@@ -479,7 +482,10 @@ async def run_chain(
                     for variant_id in reversed(range(client.havoc_variants)):
                         targets.append(f"{method_name}-{variant_id}")
                 elif method_name == "exploit":
-                    for variant_id in reversed(range(client.exploit_variants)):
+                    for variant_id in reversed(range(len(client.exploit_variants))):
+                        targets.append(f"{method_name}-{variant_id}")
+                elif method_name == "test":
+                    for variant_id in reversed(range(client.test_variants)):
                         targets.append(f"{method_name}-{variant_id}")
                 elif method_name == "all":
                     targets.append("exploit")
@@ -526,13 +532,12 @@ async def run_chain(
                 method = (client.getnoise, variant_id, repeat_id)
             elif method_name == "havoc":
                 method = (client.havoc, variant_id, repeat_id)
+            elif method_name == "test":
+                method = (client.test, variant_id, repeat_id)
             elif method_name == "exploit":
-                retry = False
-                for flag_variant in reversed(range(client.flag_variants)):
-                    if auto and ("putflag", flag_variant) not in seen:
-                        targets.append(f"putflag-{flag_variant}")
-                        retry = True
-                if retry:
+                flag_variant = client.exploit_variants[variant_id]
+                if auto and ("putflag", flag_variant, repeat_id) not in seen:
+                    targets.append(f"putflag-{flag_variant}-{repeat_id}")
                     continue
                 method = (client.exploit, variant_id, 0, repeat_id)
             else:
@@ -581,6 +586,8 @@ def task_message_from_namespace(ns: argparse.Namespace) -> CheckerTaskMessage:
             option = "havoc"
         elif method == CheckerMethod.EXPLOIT:
             option = "exploit"
+        elif method == CheckerMethod.TEST:
+            option = "test"
         else:
             raise ValueError(f"Unexpected CheckerMethod: {method}")
         task_chain_id = (
@@ -607,6 +614,7 @@ def task_message_from_namespace(ns: argparse.Namespace) -> CheckerTaskMessage:
         flag_regex=ns.flag_regex,
         flag_hash=flag_hash,
         attack_info=ns.attack_info,
+        seed=ns.seed,
     )
 
     return msg
@@ -625,6 +633,8 @@ def dispatch_raw_task(
     if result.ok:
         result_msg = CheckerResultMessage.model_validate_json(result.text)
         print(result_msg.result)
+        if result_msg.metadata is not None:
+            print(result_msg.metadata)
     else:
         print(result.status_code)
         print(result.text)
@@ -743,6 +753,12 @@ def main() -> None:
         type=str,
         default=None,
         help="unique id which must be identical for all related putflag/getflag calls and putnoise/getnoise calls",
+    )
+    raw_parser.add_argument(
+        "--seed",
+        type=str,
+        default=None,
+        help="seed the checker should use for random behaviour",
     )
     raw_parser.add_argument(
         "--attack-info",

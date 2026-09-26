@@ -37,14 +37,14 @@ usage: enochecker_cli raw [-h] [--task-id TASK_ID] [--team-id TEAM_ID]
                           [--related-round-id RELATED_ROUND_ID] [--flag FLAG]
                           [--variant-id VARIANT_ID]
                           [--round-length ROUND_LENGTH]
-                          [--task-chain-id TASK_CHAIN_ID]
+                          [--task-chain-id TASK_CHAIN_ID] [--seed SEED]
                           [--attack-info ATTACK_INFO]
-                          {putflag,getflag,putnoise,getnoise,havoc,exploit}
+                          {putflag,getflag,putnoise,getnoise,havoc,exploit,test}
 
 positional arguments:
-  {putflag,getflag,putnoise,getnoise,havoc,exploit}
+  {putflag,getflag,putnoise,getnoise,havoc,exploit,test}
                         one of: putflag, getflag, putnoise, getnoise, havoc,
-                        exploit
+                        exploit, test
 
 options:
   -h, --help            show this help message and exit
@@ -65,6 +65,7 @@ options:
   --task-chain-id TASK_CHAIN_ID
                         unique id which must be identical for all related
                         putflag/getflag calls and putnoise/getnoise calls
+  --seed SEED           seed the checker should use for random behaviour
   --attack-info ATTACK_INFO
                         attack info returned by the corresponding putflag,
                         used only when running the exploit method
@@ -76,7 +77,7 @@ usage: enochecker_cli run [-h] [-m MULTIPLY] [--loop] targets [targets ...]
 positional arguments:
   targets               one of: putflag, putflag-N, getflag, getflag-N,
                         putnoise, putnoise-N, getnoise, getnoise-N, havoc,
-                        havoc-N, exploit, exploit-N, all
+                        havoc-N, exploit, exploit-N, test, test-N, all
 
 options:
   -h, --help            show this help message and exit

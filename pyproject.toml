@@ -1,6 +1,6 @@
 [project]
 name = "enochecker-cli"
-version = "1.2.0"
+version = "0.18.2"
 description = "Enochecker CLI"
 authors = [
 	{ name = "Louis Burda", email = "dev@sinitax.com" },
@@ -80,4 +80,4 @@ ignore_missing_imports = true
 default-groups = ["prod"]
 
 [tool.uv.sources]
-enochecker-core = { git = "https://git.atklab.cloud/atklab/enochecker-core", rev = "v0.11.1", group = "prod" }
+enochecker-core = { git = "https://git.atklab.cloud/atklab/enochecker-core", rev = "v0.18.2", group = "prod" }
