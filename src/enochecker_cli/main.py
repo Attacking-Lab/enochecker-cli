@@ -2,6 +2,7 @@ import argparse
 import dataclasses
 import hashlib
 from io import TextIOWrapper
+import itertools
 import random
 import pathlib
 import time
@@ -9,6 +10,7 @@ import types
 import asyncio
 import collections
 import secrets
+import sys
 from typing_extensions import Self
 import os
 
@@ -27,26 +29,58 @@ from enochecker_core import (
     CheckerTaskResult,
 )
 
-from enochecker_cli.scheduling import DEFAULT_SCHEDULER, SCHEDULERS, schedule_round
+from enochecker_cli.scheduling import (
+    CLIENT_TIMEOUT_GRACE_S,
+    EnoConfig,
+    RoundPlan,
+    ScheduleError,
+    plan_round,
+)
 
 TASK_TYPES = [str(i) for i in CheckerMethod]
+
+DEFAULT_TIMEOUT_S = 60
+# Mirrors the gameserver's EnoRunnerConfig.timeout and DEFAULT_ROUND_LENGTH_S.
+DEFAULT_SIM_TIMEOUT_S = 15
+DEFAULT_SIM_ROUND_TIME_S = 60
+
+# What the gameserver reports when a checker misses the deadline it was given.
+TIMEOUT_MESSAGE = "TIMEOUT"
+
+FLAG_METHODS = (CheckerMethod.PUTFLAG, CheckerMethod.GETFLAG)
+NOISE_METHODS = (CheckerMethod.PUTNOISE, CheckerMethod.GETNOISE)
 
 
 @dataclasses.dataclass
 class LogEntry:
     round_id: int
+    related_round_id: int
     operation: str
     variant_id: int
-    team: int | None
+    team: int
+    result: str
+    started: float
     time_taken: float
-    repeat: int
 
     def to_csv(self) -> str:
-        return f"{self.round_id},{self.operation},{self.variant_id},{self.repeat},{self.team or ''},{self.time_taken}"
+        return (
+            f"{self.round_id},{self.related_round_id},{self.operation},"
+            f"{self.variant_id},{self.team},{self.result},"
+            f"{self.started:.3f},{self.time_taken:.3f}"
+        )
 
     @staticmethod
     def csv_header() -> str:
-        return "round_id,operation,variant_id,repeat,team,time_taken"
+        return "round_id,related_round_id,operation,variant_id,team,result,started,time_taken"
+
+
+def result_label(result: CheckerResultMessage) -> str:
+    if (
+        result.result == CheckerTaskResult.INTERNAL_ERROR
+        and result.message == TIMEOUT_MESSAGE
+    ):
+        return TIMEOUT_MESSAGE
+    return str(CheckerTaskResult(result.result).value)
 
 
 class CheckerClient:
@@ -56,8 +90,9 @@ class CheckerClient:
         service_address: str,
         output: pathlib.Path | None,
         flag_regex: str,
-        timeout: int,
+        timeout: float,
         seed: int = 0,
+        round_length: float | None = None,
     ):
         self.output_path = output
         self.service_address = service_address
@@ -68,14 +103,17 @@ class CheckerClient:
 
         random_source = SystemRandom if seed == 0 else Random
         self._id_random = random_source(seed)
-        self._client = httpx.AsyncClient()
+        # Unbounded so the client never queues requests the gameserver would
+        # have sent: that would hide load and inflate measured task times.
+        self._client = httpx.AsyncClient(limits=httpx.Limits(max_connections=None))
         self._log: TextIOWrapper | None = None
         self._connected = False
         self._token = "loadtest-" + secrets.token_urlsafe(10)
-        self._flags: dict[int, dict[tuple[int, int], tuple[str, str | None]]] = (
-            collections.defaultdict(dict)
-        )
+        # (related round, team, flag variant, repeat) -> (flag, attack info)
+        self._flags: dict[tuple[int, int, int, int], tuple[str, str | None]] = {}
         self.timeout = timeout
+        self.round_length = round_length if round_length is not None else timeout
+        self.results: collections.Counter[str] = collections.Counter()
 
         self.flag_variants = 0
         self.noise_variants = 0
@@ -119,31 +157,18 @@ class CheckerClient:
         self._flags.clear()
         await self._client.__aexit__(exc_type, exc_value, traceback)
 
-    async def _request(
-        self, message: CheckerTaskMessage
-    ) -> tuple[CheckerResultMessage, float]:
-        assert self._connected, "Client is not connected (did you forget `async with`)?"
-        start = time.monotonic()
-        response = await self._client.post(
-            self.url,
-            content=message.model_dump_json(),
-            headers={"Content-Type": "application/json"},
-            timeout=self.timeout,
-        )
-        end = time.monotonic()
-        assert response.status_code == 200, response.text
-        result = CheckerResultMessage.model_validate_json(response.text)
-        status = CheckerTaskResult(result.result)
-        if message.method != CheckerMethod.EXPLOIT:
-            assert status == CheckerTaskResult.OK, response.text
-        return result, end - start
-
     def add_log_entries(self, entries: list[LogEntry]) -> None:
         assert self._connected, "Client is not connected (did you forget `async with`)?"
+        for entry in entries:
+            self.results[entry.result] += 1
         if self._log:
             for entry in entries:
                 self._log.write(entry.to_csv() + "\n")
             self._log.flush()
+
+    def forget_flags(self, before_round: int) -> None:
+        for key in [key for key in self._flags if key[0] < before_round]:
+            del self._flags[key]
 
     def display(self) -> str:
         assert self._connected, "Client is not connected (did you forget `async with`)?"
@@ -163,234 +188,245 @@ class CheckerClient:
         *,
         method: CheckerMethod,
         round_id: int,
+        related_round_id: int,
+        team_id: int,
         flag: str | None,
         variant_id: int,
         attack_info: str | None,
-        repeat: int = 0,
+        repeat: int,
     ) -> CheckerTaskMessage:
         task_id = self._id_random.randint(0, 1 << 64)
-        if method in (CheckerMethod.PUTFLAG, CheckerMethod.GETFLAG):
-            chain_id = f"flag-{round_id}-{variant_id}-{repeat}-{self._token}"
-        elif method in (CheckerMethod.PUTNOISE, CheckerMethod.GETNOISE):
-            chain_id = f"noise-{round_id}-{variant_id}-{repeat}-{self._token}"
+        instance = (
+            f"r{related_round_id}-t{team_id}-v{variant_id}-{repeat}-{self._token}"
+        )
+        if method in FLAG_METHODS:
+            chain_id = f"flag-{instance}"
+        elif method in NOISE_METHODS:
+            chain_id = f"noise-{instance}"
         else:
             chain_id = f"unique-{task_id}-{repeat}-{self._token}"
         return CheckerTaskMessage(
             task_id=task_id,
             method=method,
             address=self.service_address,
-            team_id=0,
-            team_name="load_test_victim",
+            team_id=team_id,
+            team_name=f"#{team_id}",
             current_round_id=round_id,
-            related_round_id=round_id,
+            related_round_id=related_round_id,
             flag=flag,
             variant_id=variant_id,
-            timeout=self.timeout * 1000,
-            round_length=self.timeout * 1000,
+            timeout=int(self.timeout * 1000),
+            round_length=int(self.round_length * 1000),
             task_chain_id=chain_id,
             flag_regex=self.flag_regex,
             flag_hash=hashlib.sha256(flag.encode()).hexdigest() if flag else None,
             attack_info=attack_info,
         )
 
-    async def putflag(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
-        flag = exrex.getone(self.flag_regex, limit=64)
-        message = self._build_request(
-            method=CheckerMethod.PUTFLAG,
-            round_id=round_id,
-            flag=flag,
-            variant_id=variant_id,
-            attack_info=None,
-            repeat=repeat,
-        )
-        response, duration = await self._request(message)
-        self._flags[round_id][(variant_id, repeat)] = (flag, response.attack_info)
-        return LogEntry(round_id, "putflag", variant_id, None, duration, repeat)
+    async def task(
+        self,
+        method: CheckerMethod,
+        *,
+        round_id: int,
+        variant_id: int,
+        related_round_id: int | None = None,
+        team_id: int = 0,
+        repeat: int = 0,
+        strict: bool = True,
+        http: httpx.AsyncClient | None = None,
+    ) -> tuple[CheckerResultMessage, float]:
+        """Run one checker task and return its result and duration.
 
-    async def getflag(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
-        flag, attack_info = self._flags[round_id][(variant_id, repeat)]
-        message = self._build_request(
-            method=CheckerMethod.GETFLAG,
-            round_id=round_id,
-            flag=flag,
-            variant_id=variant_id,
-            attack_info=attack_info,
-            repeat=repeat,
-        )
-        _, duration = await self._request(message)
-        return LogEntry(round_id, "getflag", variant_id, None, duration, repeat)
+        strict (used by `run`) raises on anything but OK, the way a developer
+        poking at a checker wants. Non-strict (used by `sim`) reports failures
+        as results instead, like the gameserver: under load they are the data.
+        """
+        assert self._connected, "Client is not connected (did you forget `async with`)?"
+        related = round_id if related_round_id is None else related_round_id
 
-    async def putnoise(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
-        message = self._build_request(
-            method=CheckerMethod.PUTNOISE,
-            round_id=round_id,
-            flag=None,
-            variant_id=variant_id,
-            attack_info=None,
-            repeat=repeat,
-        )
-        _, duration = await self._request(message)
-        return LogEntry(round_id, "putnoise", variant_id, None, duration, repeat)
+        flag: str | None = None
+        attack_info: str | None = None
+        if method == CheckerMethod.PUTFLAG:
+            flag = exrex.getone(self.flag_regex, limit=64)
+            # Stored before the request: the gameserver checks a flag whether
+            # or not its PUTFLAG succeeded.
+            self._flags[(related, team_id, variant_id, repeat)] = (flag, None)
+        elif method == CheckerMethod.GETFLAG:
+            flag, attack_info = self._flags[(related, team_id, variant_id, repeat)]
+        elif method == CheckerMethod.EXPLOIT:
+            flag_variant_id = self.exploit_variants[variant_id]
+            flag, attack_info = self._flags[(related, team_id, flag_variant_id, repeat)]
 
-    async def getnoise(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
         message = self._build_request(
-            method=CheckerMethod.GETNOISE,
+            method=method,
             round_id=round_id,
-            flag=None,
-            variant_id=variant_id,
-            attack_info=None,
-            repeat=repeat,
-        )
-        _, duration = await self._request(message)
-        return LogEntry(round_id, "getnoise", variant_id, None, duration, repeat)
-
-    async def havoc(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
-        message = self._build_request(
-            method=CheckerMethod.HAVOC,
-            round_id=round_id,
-            flag=None,
-            variant_id=variant_id,
-            attack_info=None,
-            repeat=repeat,
-        )
-        _, duration = await self._request(message)
-        return LogEntry(round_id, "havoc", variant_id, None, duration, repeat)
-
-    async def test(self, round_id: int, variant_id: int, repeat: int) -> LogEntry:
-        message = self._build_request(
-            method=CheckerMethod.TEST,
-            round_id=round_id,
-            flag=None,
-            variant_id=variant_id,
-            attack_info=None,
-            repeat=repeat,
-        )
-        _, duration = await self._request(message)
-        return LogEntry(round_id, "test", variant_id, None, duration, repeat)
-
-    async def exploit(
-        self, round_id: int, variant_id: int, source_team: int, repeat: int = 0
-    ) -> LogEntry:
-        flag_variant_id = self.exploit_variants[variant_id]
-        flag, attack_info = self._flags[round_id][(flag_variant_id, repeat)]
-        message = self._build_request(
-            method=CheckerMethod.EXPLOIT,
-            round_id=round_id,
+            related_round_id=related,
+            team_id=team_id,
             flag=flag,
             variant_id=variant_id,
             attack_info=attack_info,
             repeat=repeat,
         )
-        result, duration = await self._request(message)
-        if CheckerTaskResult(result.result) == CheckerTaskResult.OK:
-            assert result.flag == flag, (
-                f"exploit {variant_id} returned {result.flag}, expected {flag}"
+        start = time.monotonic()
+        try:
+            response = await (http or self._client).post(
+                self.url,
+                content=message.model_dump_json(),
+                headers={"Content-Type": "application/json"},
+                timeout=self.timeout + CLIENT_TIMEOUT_GRACE_S,
             )
-        else:
-            assert result.message in ("No flags found", "Flag not found"), (
-                result.message
+            assert response.status_code == 200, response.text
+            result = CheckerResultMessage.model_validate_json(response.text)
+        except Exception as e:
+            if strict:
+                raise
+            message_text = (
+                TIMEOUT_MESSAGE
+                if isinstance(e, httpx.TimeoutException)
+                else f"{type(e).__name__}: {e}"
             )
-        return LogEntry(round_id, "exploit", variant_id, source_team, duration, repeat)
+            result = CheckerResultMessage(
+                result=CheckerTaskResult.INTERNAL_ERROR, message=message_text
+            )
+        duration = time.monotonic() - start
+        status = CheckerTaskResult(result.result)
+
+        if method == CheckerMethod.PUTFLAG and status == CheckerTaskResult.OK:
+            assert flag is not None
+            self._flags[(related, team_id, variant_id, repeat)] = (
+                flag,
+                result.attack_info,
+            )
+
+        if method == CheckerMethod.EXPLOIT:
+            if status == CheckerTaskResult.OK and result.flag != flag:
+                if strict:
+                    raise AssertionError(
+                        f"exploit {variant_id} returned {result.flag}, expected {flag}"
+                    )
+                result = CheckerResultMessage(
+                    result=CheckerTaskResult.MUMBLE,
+                    message=f"exploit returned wrong flag {result.flag!r}",
+                )
+            elif strict and status != CheckerTaskResult.OK:
+                assert result.message in ("No flags found", "Flag not found"), (
+                    result.message
+                )
+        elif strict:
+            assert status == CheckerTaskResult.OK, result.model_dump_json()
+
+        return result, duration
+
+    async def _scheduled_task(
+        self,
+        round_start: float,
+        offset: float,
+        method: CheckerMethod,
+        *,
+        round_id: int,
+        related_round_id: int,
+        variant_id: int,
+        team_id: int,
+        http: httpx.AsyncClient | None = None,
+    ) -> None:
+        delay = round_start + offset - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        started = time.monotonic() - round_start
+        result, duration = await self.task(
+            method,
+            round_id=round_id,
+            related_round_id=related_round_id,
+            variant_id=variant_id,
+            team_id=team_id,
+            strict=False,
+            http=http,
+        )
+        self.add_log_entries(
+            [
+                LogEntry(
+                    round_id,
+                    related_round_id,
+                    str(method),
+                    variant_id,
+                    team_id,
+                    result_label(result),
+                    started,
+                    duration,
+                )
+            ]
+        )
+
+    async def _simulate_team(
+        self,
+        plan: RoundPlan,
+        round_start: float,
+        round_id: int,
+        first_round_id: int,
+        team_id: int,
+    ) -> None:
+        jobs = []
+        # One HTTP session per team-run, like the gameserver's eno runner:
+        # connection reuse is part of the load profile the checker sees.
+        async with httpx.AsyncClient(limits=httpx.Limits(max_connections=None)) as http:
+            for key, offset in plan.draw().items():
+                related = round_id - key.related_round_offset
+                # Past rounds before the game started have no flag to check.
+                if related < first_round_id:
+                    continue
+                jobs.append(
+                    self._scheduled_task(
+                        round_start,
+                        offset,
+                        key.method,
+                        round_id=round_id,
+                        related_round_id=related,
+                        variant_id=key.variant_id,
+                        team_id=team_id,
+                        http=http,
+                    )
+                )
+            await asyncio.gather(*jobs)
 
     async def simulate_round(
         self,
+        plan: RoundPlan,
+        *,
+        round_start: float,
         round_id: int,
-        multiplier: int,
+        first_round_id: int,
+        teams: int,
         exploiters: int,
-        round_time: int | None = None,
-        concurrency: int = 4,
-        jitter: bool = True,
-        scheduler: str = DEFAULT_SCHEDULER,
+        rng: random.Random,
     ) -> None:
+        """One round of gameserver traffic: every team runs its own draw from
+        the shared schedule pool, all anchored at `round_start`.
+
+        Exploits are not gameserver traffic. With `exploiters`, each exploiter
+        additionally runs every exploit variant once per round against a random
+        team's flag from the previous round, at a uniformly random time.
+        """
         assert self._connected, "Client is not connected (did you forget `async with`)?"
-
-        # tasks[i] = (op, *args); edges are (put_index, get_index) so the
-        # scheduler never starts a get before its put has had `timeout`
-        # seconds to complete.
-        tasks: list[tuple] = []
-        edges: list[tuple[int, int]] = []
-        putflag_zero: dict[int, int] = {}  # flag variant -> putflag(repeat=0) index
-
-        for variant_id in range(self.flag_variants):
-            for repeat in range(multiplier):
-                put_i = len(tasks)
-                tasks.append((self.putflag, variant_id, repeat))
-                if repeat == 0:
-                    putflag_zero[variant_id] = put_i
-                get_i = len(tasks)
-                tasks.append((self.getflag, variant_id, repeat))
-                edges.append((put_i, get_i))
-
-        for variant_id in range(self.noise_variants):
-            for repeat in range(multiplier):
-                put_i = len(tasks)
-                tasks.append((self.putnoise, variant_id, repeat))
-                get_i = len(tasks)
-                tasks.append((self.getnoise, variant_id, repeat))
-                edges.append((put_i, get_i))
-
-        for variant_id in range(self.havoc_variants):
-            for repeat in range(multiplier):
-                tasks.append((self.havoc, variant_id, repeat))
-
-        # exploit() reads this round's putflag(repeat=0) flag of the flag
-        # variant it targets (see exploit() above), so it must not be
-        # scheduled before that put lands.
-        for variant_id, flag_variant_id in enumerate(self.exploit_variants):
-            for team in range(exploiters):
-                exploit_i = len(tasks)
-                tasks.append((self.exploit, variant_id, team))
-                edges.append((putflag_zero[flag_variant_id], exploit_i))
-
-        if round_time is None:
-            # No horizon to schedule against: just respect dependency order
-            # (predecessors before dependents) with two unbounded phases,
-            # same as the old hand-rolled put-then-get split.
-            has_incoming = {b for _, b in edges}
-            phase1 = [i for i in range(len(tasks)) if i not in has_incoming]
-            phase2 = [i for i in range(len(tasks)) if i in has_incoming]
-            self.add_log_entries(
-                await asyncio.gather(
-                    *[tasks[i][0](round_id, *tasks[i][1:]) for i in phase1]
-                )
-            )
-            if phase2:
-                self.add_log_entries(
-                    await asyncio.gather(
-                        *[tasks[i][0](round_id, *tasks[i][1:]) for i in phase2]
+        jobs = [
+            self._simulate_team(plan, round_start, round_id, first_round_id, team_id)
+            for team_id in range(1, teams + 1)
+        ]
+        if round_id > first_round_id:
+            latest_start = plan.m - plan.k
+            for _ in range(exploiters):
+                for variant_id in range(len(self.exploit_variants)):
+                    jobs.append(
+                        self._scheduled_task(
+                            round_start,
+                            rng.uniform(0, latest_start),
+                            CheckerMethod.EXPLOIT,
+                            round_id=round_id,
+                            related_round_id=round_id - 1,
+                            variant_id=variant_id,
+                            team_id=rng.randint(1, teams),
+                        )
                     )
-                )
-            return
-
-        # Schedule the round: task duration/min put->get gap K = timeout,
-        # horizon M = round_time. See enochecker_cli.scheduling for the
-        # available algorithms and how each treats concurrency/jitter.
-        sched = schedule_round(
-            scheduler,
-            n=len(tasks),
-            edges=edges,
-            m=round_time,
-            k=self.timeout,
-            c=concurrency,
-            jitter=jitter,
-        )
-
-        round_start = time.monotonic()
-
-        async def run_task(i: int, op, args: list) -> None:
-            target = round_start + sched.start_offset[i]
-            now = time.monotonic()
-            if now < target:
-                await asyncio.sleep(target - now)
-            self.add_log_entries([await op(round_id, *args)])
-
-        await asyncio.gather(
-            *[run_task(i, op, args) for i, (op, *args) in enumerate(tasks)]
-        )
-
-        remaining = round_start + round_time - time.monotonic()
-        if remaining > 0:
-            await asyncio.sleep(remaining)
+        await asyncio.gather(*jobs)
 
 
 async def run_sim(
@@ -398,51 +434,93 @@ async def run_sim(
     checker_port: int,
     service_address: str,
     rounds: int | None,
+    teams: int,
     exploiters: int,
     flag_regex: str,
-    multiplier: int,
     output: pathlib.Path | None,
-    timeout: int,
     seed: int,
-    round_time: int | None,
-    concurrency: int,
-    jitter: bool,
-    scheduler: str,
+    round_time: int,
+    eno: EnoConfig,
 ):
     url = f"http://{checker_address}:{checker_port}"
+    rng: random.Random = Random(seed) if seed else SystemRandom()
     async with CheckerClient(
-        url, service_address, output, flag_regex, timeout, seed=seed
+        url,
+        service_address,
+        output,
+        flag_regex,
+        eno.timeout,
+        seed=seed,
+        round_length=round_time,
     ) as client:
         print(client.display())
+        plan = plan_round(
+            eno,
+            round_time,
+            flag_variants=client.flag_variants,
+            noise_variants=client.noise_variants,
+            havoc_variants=client.havoc_variants,
+            rng=rng,
+        )
+        print(f"\x1b[31;1mteams\x1b[0m:        {teams}")
         print(
             f"\x1b[31;1mrounds\x1b[0m:       {'unlimited' if rounds is None else rounds}"
         )
+        print(
+            f"\x1b[31;1mround-time\x1b[0m:   {round_time}s "
+            f"(tasks run in the first {plan.m}s, {eno.checker_hold}s hold; "
+            f"min {plan.min_round_length}s)"
+        )
+        print(
+            f"\x1b[31;1mtasks\x1b[0m:        {len(plan.keys)} per team-round "
+            f"(flags checked for {eno.check_past_rounds} past rounds), "
+            f"{len(plan.keys) * teams} per round"
+        )
+        print(
+            f"\x1b[31;1mconcurrency\x1b[0m:  {plan.c} per team ({plan.c_source}), "
+            f"up to {plan.c * teams} at the checker; slot K={plan.k}s "
+            f"for timeout {eno.timeout:g}s"
+        )
         print(f"\x1b[31;1mexploiters\x1b[0m:   {exploiters}")
-        print(f"\x1b[31;1mmultiplier\x1b[0m:   {multiplier}")
-        if round_time is not None:
-            print(
-                f"\x1b[31;1mround-time\x1b[0m:   {round_time}s "
-                f"(scheduler: {scheduler}, K={timeout}s, C={concurrency}, jitter={jitter})"
-            )
 
-        round_id_base = random.randint(0, 10000000000)
+        first_round_id = random.randint(1, 1 << 30)
+        next_start = time.monotonic()
         with Progress(
-            TextColumn("[progress.description]"), BarColumn(), MofNCompleteColumn()
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
         ) as progress:
-            task = progress.add_task("Simulating..", total=rounds)
-            round_id = 0
-            while rounds is None or round_id < rounds:
+            bar = progress.add_task("round", total=rounds)
+            for index in itertools.count() if rounds is None else range(rounds):
+                round_id = first_round_id + index
+                round_start = next_start
                 await client.simulate_round(
-                    round_id_base + round_id,
-                    multiplier,
-                    exploiters,
-                    round_time=round_time,
-                    concurrency=concurrency,
-                    jitter=jitter,
-                    scheduler=scheduler,
+                    plan,
+                    round_start=round_start,
+                    round_id=round_id,
+                    first_round_id=first_round_id,
+                    teams=teams,
+                    exploiters=exploiters,
+                    rng=rng,
                 )
-                progress.update(task, advance=1)
-                round_id += 1
+                client.forget_flags(round_id - eno.check_past_rounds)
+                progress.update(
+                    bar,
+                    advance=1,
+                    description=" ".join(
+                        f"{name}={count}"
+                        for name, count in sorted(client.results.items())
+                    ),
+                )
+                next_start = round_start + round_time
+                lag = time.monotonic() - next_start
+                if lag > 0:
+                    progress.console.print(
+                        f"round {index} overran its {round_time}s by {lag:.1f}s"
+                    )
+                    next_start = time.monotonic()
+                else:
+                    await asyncio.sleep(-lag)
 
 
 async def run_chain(
@@ -453,7 +531,7 @@ async def run_chain(
     flag_regex: str,
     loop: bool,
     targets: list[str],
-    timeout: int,
+    timeout: float,
     auto: bool,
     seed: int,
 ):
@@ -465,7 +543,7 @@ async def run_chain(
 
         seen = set()
         repeat_seq = 0
-        resolved_targets = []
+        resolved_targets: list[tuple[CheckerMethod, int, int]] = []
         targets = targets[::-1]
         while len(targets) > 0:
             target = targets[-1]
@@ -515,38 +593,26 @@ async def run_chain(
                     repeat_seq += 1
                 repeat_id = repeat_seq
 
-            method: tuple
-            if method_name == "putflag":
-                method = (client.putflag, variant_id, repeat_id)
-            elif method_name == "getflag":
+            if method_name == "getflag":
                 if auto and ("putflag", variant_id, repeat_id) not in seen:
                     targets.append(f"putflag-{variant_id}-{repeat_id}")
                     continue
-                method = (client.getflag, variant_id, repeat_id)
-            elif method_name == "putnoise":
-                method = (client.putnoise, variant_id, repeat_id)
             elif method_name == "getnoise":
                 if auto and ("putnoise", variant_id, repeat_id) not in seen:
                     targets.append(f"putnoise-{variant_id}")
                     continue
-                method = (client.getnoise, variant_id, repeat_id)
-            elif method_name == "havoc":
-                method = (client.havoc, variant_id, repeat_id)
-            elif method_name == "test":
-                method = (client.test, variant_id, repeat_id)
             elif method_name == "exploit":
                 flag_variant = client.exploit_variants[variant_id]
                 if auto and ("putflag", flag_variant, repeat_id) not in seen:
                     targets.append(f"putflag-{flag_variant}-{repeat_id}")
                     continue
-                method = (client.exploit, variant_id, 0, repeat_id)
-            else:
+            elif method_name not in TASK_TYPES:
                 raise ValueError(f"Unknown method {method_name}")
             seen.add((method_name, variant_id, repeat_id))
             print(
                 f"\x1b[31;1mcall\x1b[0m:         {method_name}-{variant_id}-{repeat_id}"
             )
-            resolved_targets.append(method)
+            resolved_targets.append((CheckerMethod(method_name), variant_id, repeat_id))
 
             targets.pop()
 
@@ -554,21 +620,16 @@ async def run_chain(
 
         round_id_base = random.randint(0, 10000000000)
 
-        chains = []
-        for round_id in range(multiply):
-            round_id_ = round_id
-
-            def gen():
-                async def chain(round_id):
-                    for method_fn, *args in resolved_targets:
-                        await method_fn(round_id_base + round_id, *args)
-
-                return chain(round_id_)
-
-            chains.append(gen)
+        async def chain(round_id: int) -> None:
+            for method, variant_id, repeat_id in resolved_targets:
+                await client.task(
+                    method, round_id=round_id, variant_id=variant_id, repeat=repeat_id
+                )
 
         while True:
-            await asyncio.gather(*[gen() for gen in chains])
+            await asyncio.gather(
+                *[chain(round_id_base + round_id) for round_id in range(multiply)]
+            )
             if not loop:
                 break
 
@@ -608,7 +669,7 @@ def task_message_from_namespace(ns: argparse.Namespace) -> CheckerTaskMessage:
         related_round_id=ns.related_round_id,
         flag=ns.flag if method != CheckerMethod.EXPLOIT else None,
         variant_id=ns.variant_id,
-        timeout=ns.timeout * 1000,
+        timeout=int(ns.timeout * 1000),
         round_length=ns.round_length,
         task_chain_id=task_chain_id,
         flag_regex=ns.flag_regex,
@@ -688,9 +749,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--timeout",
-        type=int,
-        default=60,
-        help="Number of seconds to wait until a checker task completes",
+        type=float,
+        default=None,
+        help=f"Number of seconds to wait until a checker task completes "
+        f"(default: {DEFAULT_TIMEOUT_S}, sim: {DEFAULT_SIM_TIMEOUT_S} like the gameserver)",
     )
 
     commands_group = parser.add_subparsers(dest="command", title="Commands")
@@ -793,18 +855,15 @@ def main() -> None:
     )
 
     sim_parser.add_argument(
-        "--exploiters",
-        type=int,
-        default=50,
-        help="number of exploiters to simulate",
-    )
-    sim_parser.add_argument(
+        "-t",
+        "--teams",
         "-m",
         "--multiply",
+        dest="teams",
         type=int,
         default=1,
-        metavar="FACTOR",
-        help="multiplier for non-exploit traffic",
+        help="number of teams the gameserver checks each round; each runs "
+        "its own schedule draw (default: 1)",
     )
     sim_parser.add_argument(
         "--rounds",
@@ -813,50 +872,74 @@ def main() -> None:
         help="number of rounds to simulate (default: run until interrupted)",
     )
     sim_parser.add_argument(
-        "--statistics",
-        metavar="PATH",
-        help="collect statistics into this file",
-        type=pathlib.Path,
-    )
-    sim_parser.add_argument(
-        "-s", "--seed", type=int, default=0, help="seed for task generator"
-    )
-    sim_parser.add_argument(
         "--round-time",
         type=int,
-        default=None,
+        default=DEFAULT_SIM_ROUND_TIME_S,
         metavar="SECONDS",
-        help="spread each round's tasks across the round using --scheduler; "
-        "putflag/putnoise are scheduled at least `--timeout` seconds before "
-        "their corresponding getflag/getnoise so they never race",
+        help=f"round length (default: {DEFAULT_SIM_ROUND_TIME_S})",
     )
     sim_parser.add_argument(
-        "--scheduler",
-        choices=sorted(SCHEDULERS),
-        default=DEFAULT_SCHEDULER,
-        help="algorithm used to place tasks within the round when "
-        f"--round-time is set (default: {DEFAULT_SCHEDULER}); 'edf' is the "
-        "round-grid EDF sampler with an exact --concurrency cap, 'phase' is "
-        "the earlier put/get/unconstrained-window scheduler it replaced "
-        "(no concurrency cap; see enochecker_cli.scheduling)",
+        "--check-past-rounds",
+        type=int,
+        default=EnoConfig.check_past_rounds,
+        metavar="N",
+        help="rounds after the one it was stored in that a flag keeps being "
+        "checked with getflag; match the game's flag validity "
+        f"(default: {EnoConfig.check_past_rounds})",
+    )
+    sim_parser.add_argument(
+        "--checker-hold",
+        type=int,
+        default=EnoConfig.checker_hold,
+        metavar="SECONDS",
+        help="seconds at the end of each round in which no task runs "
+        f"(default: {EnoConfig.checker_hold})",
     )
     sim_parser.add_argument(
         "--concurrency",
         type=int,
-        default=4,
+        default=None,
         metavar="C",
-        help="max concurrent checker requests per round when --round-time "
-        "is set with --scheduler edf (default: 4)",
+        help="max concurrent checker requests per team "
+        "(default: --concurrency-factor times the minimum the round needs)",
     )
     sim_parser.add_argument(
-        "--jitter",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="randomize sub-round start offsets so timings stay "
-        "unpredictable when --round-time is set (default: yes)",
+        "--concurrency-factor",
+        type=int,
+        default=EnoConfig.concurrency_factor,
+        metavar="F",
+        help="headroom over the minimum per-team concurrency when "
+        f"--concurrency is unset (default: {EnoConfig.concurrency_factor})",
+    )
+    sim_parser.add_argument(
+        "--pool-size",
+        type=int,
+        default=EnoConfig.pool_size,
+        help="number of precomputed schedules each draw picks from "
+        f"(default: {EnoConfig.pool_size})",
+    )
+    sim_parser.add_argument(
+        "--exploiters",
+        type=int,
+        default=0,
+        help="additionally run every exploit variant this many times per "
+        "round; not gameserver traffic (default: 0)",
+    )
+    sim_parser.add_argument(
+        "--statistics",
+        metavar="PATH",
+        help="write one CSV row per task into this file",
+        type=pathlib.Path,
+    )
+    sim_parser.add_argument(
+        "-s", "--seed", type=int, default=0, help="seed for task ids and schedules"
     )
 
     args = parser.parse_args()
+    if args.timeout is None:
+        args.timeout = (
+            DEFAULT_SIM_TIMEOUT_S if args.command == "sim" else DEFAULT_TIMEOUT_S
+        )
 
     if args.service_network or args.checker_network:
         import docker
@@ -894,24 +977,31 @@ def main() -> None:
             )
         )
     elif args.command == "sim":
-        asyncio.run(
-            run_sim(
-                checker_address=args.checker_address,
-                checker_port=args.checker_port,
-                service_address=args.service_address,
-                rounds=args.rounds,
-                flag_regex=args.flag_regex,
-                multiplier=args.multiply,
-                exploiters=args.exploiters,
-                output=args.statistics,
-                timeout=args.timeout,
-                seed=args.seed,
-                round_time=args.round_time,
-                concurrency=args.concurrency,
-                jitter=args.jitter,
-                scheduler=args.scheduler,
+        try:
+            asyncio.run(
+                run_sim(
+                    checker_address=args.checker_address,
+                    checker_port=args.checker_port,
+                    service_address=args.service_address,
+                    rounds=args.rounds,
+                    teams=args.teams,
+                    exploiters=args.exploiters,
+                    flag_regex=args.flag_regex,
+                    output=args.statistics,
+                    seed=args.seed,
+                    round_time=args.round_time,
+                    eno=EnoConfig(
+                        check_past_rounds=args.check_past_rounds,
+                        timeout=args.timeout,
+                        checker_hold=args.checker_hold,
+                        concurrency=args.concurrency,
+                        concurrency_factor=args.concurrency_factor,
+                        pool_size=args.pool_size,
+                    ),
+                )
             )
-        )
+        except ScheduleError as e:
+            sys.exit(f"error: {e}")
     else:
         parser.print_help()
 
