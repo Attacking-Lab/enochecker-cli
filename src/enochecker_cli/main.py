@@ -19,7 +19,8 @@ from random import Random, SystemRandom
 import exrex
 import requests
 import httpx
-from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
+from rich.progress import Progress, ProgressColumn, Task, TextColumn
+from rich.text import Text
 
 from enochecker_core import (
     CheckerMethod,
@@ -33,6 +34,7 @@ from enochecker_cli.scheduling import (
     EnoConfig,
     RoundPlan,
     ScheduleError,
+    TaskKey,
     plan_round,
     task_budget_s,
 )
@@ -85,6 +87,97 @@ class LogEntry:
     @staticmethod
     def csv_header() -> str:
         return "round_id,related_round_id,operation,variant_id,team,result,started,time_taken"
+
+
+RESULT_STYLES = {
+    "OK": "green",
+    "MUMBLE": "yellow",
+    "OFFLINE": "red",
+    TIMEOUT_MESSAGE: "red",
+    "INTERNAL_ERROR": "magenta",
+}
+
+
+@dataclasses.dataclass
+class RoundStats:
+    total: int = 0
+    running: int = 0
+    done: int = 0
+    results: collections.Counter[str] = dataclasses.field(
+        default_factory=collections.Counter
+    )
+    time_sum: float = 0.0
+    time_max: float = 0.0
+
+    def record(self, result: str, duration: float) -> None:
+        self.done += 1
+        self.results[result] += 1
+        self.time_sum += duration
+        self.time_max = max(self.time_max, duration)
+
+    def merge(self, other: "RoundStats") -> None:
+        self.total += other.total
+        self.done += other.done
+        self.results += other.results
+        self.time_sum += other.time_sum
+        self.time_max = max(self.time_max, other.time_max)
+
+    def summary(self) -> Text:
+        text = Text()
+        for name in sorted(self.results, key=lambda name: (name != "OK", name)):
+            if text:
+                text.append(" ")
+            text.append(f"{name} {self.results[name]}", RESULT_STYLES.get(name, ""))
+        if self.done:
+            text.append(
+                f"  avg {self.time_sum / self.done:.2f}s max {self.time_max:.2f}s",
+                "bright_black",
+            )
+        return text
+
+
+def _stats(task: Task) -> RoundStats:
+    return task.fields["stats"]
+
+
+class RoundBarColumn(ProgressColumn):
+    """Done, running and queued tasks of a round as one stacked bar."""
+
+    def __init__(self, width: int = 30):
+        super().__init__()
+        self.width = width
+
+    def render(self, task: Task) -> Text:
+        stats = _stats(task)
+        total = max(stats.total, 1)
+        done = round(self.width * stats.done / total)
+        running = round(self.width * (stats.done + stats.running) / total) - done
+        return Text.assemble(
+            ("━" * done, "green"),
+            ("━" * running, "yellow"),
+            ("━" * (self.width - done - running), "bright_black"),
+        )
+
+
+class RoundCountsColumn(ProgressColumn):
+    def render(self, task: Task) -> Text:
+        stats = _stats(task)
+        width = len(str(stats.total))
+        return Text.assemble(
+            (f"{stats.done:>{width}}/{stats.total} done", "bold"),
+            f" · {stats.running:>{width}} running",
+        )
+
+
+class RoundElapsedColumn(ProgressColumn):
+    def render(self, task: Task) -> Text:
+        elapsed = task.finished_time if task.finished else task.elapsed
+        return Text(f"{elapsed or 0:4.0f}s/{task.fields['round_time']}s", "cyan")
+
+
+class RoundResultsColumn(ProgressColumn):
+    def render(self, task: Task) -> Text:
+        return _stats(task).summary()
 
 
 def result_label(result: CheckerResultMessage) -> str:
@@ -340,21 +433,27 @@ class CheckerClient:
         related_round_id: int,
         variant_id: int,
         team_id: int,
+        stats: RoundStats,
         http: httpx.AsyncClient | None = None,
     ) -> None:
         delay = round_start + offset - time.monotonic()
         if delay > 0:
             await asyncio.sleep(delay)
         started = time.monotonic() - round_start
-        result, duration = await self.task(
-            method,
-            round_id=round_id,
-            related_round_id=related_round_id,
-            variant_id=variant_id,
-            team_id=team_id,
-            strict=False,
-            http=http,
-        )
+        stats.running += 1
+        try:
+            result, duration = await self.task(
+                method,
+                round_id=round_id,
+                related_round_id=related_round_id,
+                variant_id=variant_id,
+                team_id=team_id,
+                strict=False,
+                http=http,
+            )
+        finally:
+            stats.running -= 1
+        stats.record(result_label(result), duration)
         self.add_log_entries(
             [
                 LogEntry(
@@ -372,34 +471,31 @@ class CheckerClient:
 
     async def _simulate_team(
         self,
-        plan: RoundPlan,
+        schedule: list[tuple[TaskKey, float]],
         round_start: float,
         round_id: int,
-        first_round_id: int,
         team_id: int,
+        stats: RoundStats,
     ) -> None:
-        jobs = []
         # One HTTP session per team-run, like the gameserver's eno runner:
         # connection reuse is part of the load profile the checker sees.
         async with unbounded_client() as http:
-            for key, offset in plan.draw().items():
-                related = round_id - key.related_round_offset
-                # Past rounds before the game started have no flag to check.
-                if related < first_round_id:
-                    continue
-                jobs.append(
+            await asyncio.gather(
+                *(
                     self._scheduled_task(
                         round_start,
                         offset,
                         key.method,
                         round_id=round_id,
-                        related_round_id=related,
+                        related_round_id=round_id - key.related_round_offset,
                         variant_id=key.variant_id,
                         team_id=team_id,
+                        stats=stats,
                         http=http,
                     )
+                    for key, offset in schedule
                 )
-            await asyncio.gather(*jobs)
+            )
 
     async def simulate_round(
         self,
@@ -411,6 +507,7 @@ class CheckerClient:
         teams: int,
         exploiters: int,
         rng: random.Random,
+        stats: RoundStats,
     ) -> None:
         """One round of gameserver traffic: every team runs its own draw from
         the shared schedule pool, all anchored at `round_start`.
@@ -420,14 +517,23 @@ class CheckerClient:
         team's flag from the previous round, at a uniformly random time.
         """
         assert self._connected, "Client is not connected (did you forget `async with`)?"
-        jobs = [
-            self._simulate_team(plan, round_start, round_id, first_round_id, team_id)
-            for team_id in range(1, teams + 1)
-        ]
+        jobs = []
+        for team_id in range(1, teams + 1):
+            # Past rounds before the game started have no flag to check.
+            schedule = [
+                (key, offset)
+                for key, offset in plan.draw().items()
+                if round_id - key.related_round_offset >= first_round_id
+            ]
+            stats.total += len(schedule)
+            jobs.append(
+                self._simulate_team(schedule, round_start, round_id, team_id, stats)
+            )
         if round_id > first_round_id:
             latest_start = plan.m - plan.k
             for _ in range(exploiters):
                 for variant_id in range(len(self.exploit_variants)):
+                    stats.total += 1
                     jobs.append(
                         self._scheduled_task(
                             round_start,
@@ -437,6 +543,7 @@ class CheckerClient:
                             related_round_id=round_id - 1,
                             variant_id=variant_id,
                             team_id=rng.randint(1, teams),
+                            stats=stats,
                         )
                     )
         await asyncio.gather(*jobs)
@@ -498,42 +605,69 @@ async def run_sim(
 
         first_round_id = random.randint(1, 1 << 30)
         next_start = time.monotonic()
+        totals = RoundStats()
+        rounds_done = 0
         with Progress(
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
+            TextColumn("{task.description}"),
+            RoundBarColumn(),
+            RoundCountsColumn(),
+            RoundElapsedColumn(),
+            RoundResultsColumn(),
         ) as progress:
-            bar = progress.add_task("round", total=rounds)
-            for index in itertools.count() if rounds is None else range(rounds):
-                round_id = first_round_id + index
-                round_start = next_start
-                await client.simulate_round(
-                    plan,
-                    round_start=round_start,
-                    round_id=round_id,
-                    first_round_id=first_round_id,
-                    teams=teams,
-                    exploiters=exploiters,
-                    rng=rng,
-                )
-                client.forget_flags(round_id - eno.check_past_rounds)
-                progress.update(
-                    bar,
-                    advance=1,
-                    description=" ".join(
-                        f"{name}={count}"
-                        for name, count in sorted(client.results.items())
-                    ),
-                )
-                next_start = round_start + round_time
-                lag = time.monotonic() - next_start
-                if lag > 0:
-                    progress.console.print(
-                        f"round {index} overran its {round_time}s by {lag:.1f}s"
+            try:
+                for index in itertools.count() if rounds is None else range(rounds):
+                    round_id = first_round_id + index
+                    round_start = next_start
+                    stats = RoundStats()
+                    label = f"round {index + 1}" + (
+                        "" if rounds is None else f"/{rounds}"
                     )
-                    next_start = time.monotonic()
-                else:
-                    await asyncio.sleep(-lag)
+                    bar = progress.add_task(
+                        f"[bold]{label}", stats=stats, round_time=round_time
+                    )
+                    await client.simulate_round(
+                        plan,
+                        round_start=round_start,
+                        round_id=round_id,
+                        first_round_id=first_round_id,
+                        teams=teams,
+                        exploiters=exploiters,
+                        rng=rng,
+                        stats=stats,
+                    )
+                    progress.stop_task(bar)
+                    # Finished rounds scroll up as static lines; only the
+                    # running round stays live, so unlimited runs never
+                    # outgrow the terminal.
+                    progress.console.print(
+                        progress.make_tasks_table(
+                            [t for t in progress.tasks if t.id == bar]
+                        )
+                    )
+                    progress.remove_task(bar)
+                    totals.merge(stats)
+                    rounds_done += 1
+                    client.forget_flags(round_id - eno.check_past_rounds)
+                    next_start = round_start + round_time
+                    lag = time.monotonic() - next_start
+                    if lag > 0:
+                        progress.console.print(
+                            f"[red]{label} overran its {round_time}s by {lag:.1f}s"
+                        )
+                        next_start = time.monotonic()
+                    else:
+                        await asyncio.sleep(-lag)
+            finally:
+                if rounds_done:
+                    progress.console.print(
+                        Text.assemble(
+                            (
+                                f"total: {rounds_done} rounds, {totals.done} tasks  ",
+                                "bold",
+                            ),
+                            totals.summary(),
+                        )
+                    )
 
 
 async def run_chain(
