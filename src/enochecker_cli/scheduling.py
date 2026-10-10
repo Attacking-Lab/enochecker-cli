@@ -109,9 +109,9 @@ def concurrency(eno: EnoConfig, fanouts: Sequence[int], rounds: int) -> int | No
     return min(len(fanouts) + sum(fanouts), minimum * eno.concurrency_factor)
 
 
-def task_budget_s(eno: EnoConfig) -> float:
+def task_budget_s(timeout: float) -> float:
     """Wall-clock seconds one task may occupy: the HTTP client timeout."""
-    return eno.timeout + CLIENT_TIMEOUT_GRACE_S
+    return timeout + CLIENT_TIMEOUT_GRACE_S
 
 
 def task_slot_s(eno: EnoConfig) -> int:

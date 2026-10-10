@@ -30,11 +30,11 @@ from enochecker_core import (
 )
 
 from enochecker_cli.scheduling import (
-    CLIENT_TIMEOUT_GRACE_S,
     EnoConfig,
     RoundPlan,
     ScheduleError,
     plan_round,
+    task_budget_s,
 )
 
 TASK_TYPES = [str(i) for i in CheckerMethod]
@@ -49,6 +49,19 @@ TIMEOUT_MESSAGE = "TIMEOUT"
 
 FLAG_METHODS = (CheckerMethod.PUTFLAG, CheckerMethod.GETFLAG)
 NOISE_METHODS = (CheckerMethod.PUTNOISE, CheckerMethod.GETNOISE)
+
+# The put `run --auto` inserts before a task that needs one.
+PREDECESSOR = {"getflag": "putflag", "getnoise": "putnoise", "exploit": "putflag"}
+
+
+def rng_from_seed(seed: int) -> random.Random:
+    return Random(seed) if seed else SystemRandom()
+
+
+def unbounded_client() -> httpx.AsyncClient:
+    # Unbounded so the client never queues requests the gameserver would
+    # have sent: that would hide load and inflate measured task times.
+    return httpx.AsyncClient(limits=httpx.Limits(max_connections=None))
 
 
 @dataclasses.dataclass
@@ -101,11 +114,8 @@ class CheckerClient:
         if "://" not in self.url:
             self.url = "http://" + self.url
 
-        random_source = SystemRandom if seed == 0 else Random
-        self._id_random = random_source(seed)
-        # Unbounded so the client never queues requests the gameserver would
-        # have sent: that would hide load and inflate measured task times.
-        self._client = httpx.AsyncClient(limits=httpx.Limits(max_connections=None))
+        self._id_random = rng_from_seed(seed)
+        self._client = unbounded_client()
         self._log: TextIOWrapper | None = None
         self._connected = False
         self._token = "loadtest-" + secrets.token_urlsafe(10)
@@ -165,6 +175,13 @@ class CheckerClient:
             for entry in entries:
                 self._log.write(entry.to_csv() + "\n")
             self._log.flush()
+
+    def flag_variant(self, method: CheckerMethod, variant_id: int) -> int:
+        """The flag variant a task reads or writes: an exploit variant targets
+        the flag variant the checker maps it to."""
+        if method == CheckerMethod.EXPLOIT:
+            return self.exploit_variants[variant_id]
+        return variant_id
 
     def forget_flags(self, before_round: int) -> None:
         for key in [key for key in self._flags if key[0] < before_round]:
@@ -244,18 +261,17 @@ class CheckerClient:
         assert self._connected, "Client is not connected (did you forget `async with`)?"
         related = round_id if related_round_id is None else related_round_id
 
+        flag_key = (related, team_id, self.flag_variant(method, variant_id), repeat)
+
         flag: str | None = None
         attack_info: str | None = None
         if method == CheckerMethod.PUTFLAG:
             flag = exrex.getone(self.flag_regex, limit=64)
             # Stored before the request: the gameserver checks a flag whether
             # or not its PUTFLAG succeeded.
-            self._flags[(related, team_id, variant_id, repeat)] = (flag, None)
-        elif method == CheckerMethod.GETFLAG:
-            flag, attack_info = self._flags[(related, team_id, variant_id, repeat)]
-        elif method == CheckerMethod.EXPLOIT:
-            flag_variant_id = self.exploit_variants[variant_id]
-            flag, attack_info = self._flags[(related, team_id, flag_variant_id, repeat)]
+            self._flags[flag_key] = (flag, None)
+        elif method in (CheckerMethod.GETFLAG, CheckerMethod.EXPLOIT):
+            flag, attack_info = self._flags[flag_key]
 
         message = self._build_request(
             method=method,
@@ -273,7 +289,7 @@ class CheckerClient:
                 self.url,
                 content=message.model_dump_json(),
                 headers={"Content-Type": "application/json"},
-                timeout=self.timeout + CLIENT_TIMEOUT_GRACE_S,
+                timeout=task_budget_s(self.timeout),
             )
             assert response.status_code == 200, response.text
             result = CheckerResultMessage.model_validate_json(response.text)
@@ -293,10 +309,7 @@ class CheckerClient:
 
         if method == CheckerMethod.PUTFLAG and status == CheckerTaskResult.OK:
             assert flag is not None
-            self._flags[(related, team_id, variant_id, repeat)] = (
-                flag,
-                result.attack_info,
-            )
+            self._flags[flag_key] = (flag, result.attack_info)
 
         if method == CheckerMethod.EXPLOIT:
             if status == CheckerTaskResult.OK and result.flag != flag:
@@ -368,7 +381,7 @@ class CheckerClient:
         jobs = []
         # One HTTP session per team-run, like the gameserver's eno runner:
         # connection reuse is part of the load profile the checker sees.
-        async with httpx.AsyncClient(limits=httpx.Limits(max_connections=None)) as http:
+        async with unbounded_client() as http:
             for key, offset in plan.draw().items():
                 related = round_id - key.related_round_offset
                 # Past rounds before the game started have no flag to check.
@@ -443,7 +456,7 @@ async def run_sim(
     eno: EnoConfig,
 ):
     url = f"http://{checker_address}:{checker_port}"
-    rng: random.Random = Random(seed) if seed else SystemRandom()
+    rng = rng_from_seed(seed)
     async with CheckerClient(
         url,
         service_address,
@@ -541,6 +554,15 @@ async def run_chain(
     ) as client:
         print(client.display())
 
+        variant_counts = {
+            "putflag": client.flag_variants,
+            "getflag": client.flag_variants,
+            "putnoise": client.noise_variants,
+            "getnoise": client.noise_variants,
+            "havoc": client.havoc_variants,
+            "exploit": len(client.exploit_variants),
+            "test": client.test_variants,
+        }
         seen = set()
         repeat_seq = 0
         resolved_targets: list[tuple[CheckerMethod, int, int]] = []
@@ -550,21 +572,11 @@ async def run_chain(
             if "-" not in target:
                 method_name = target
                 targets.pop()
-                if method_name in {"putflag", "getflag"}:
-                    for variant_id in reversed(range(client.flag_variants)):
-                        targets.append(f"{method_name}-{variant_id}")
-                elif method_name in {"putnoise", "getnoise"}:
-                    for variant_id in reversed(range(client.noise_variants)):
-                        targets.append(f"{method_name}-{variant_id}")
-                elif method_name == "havoc":
-                    for variant_id in reversed(range(client.havoc_variants)):
-                        targets.append(f"{method_name}-{variant_id}")
-                elif method_name == "exploit":
-                    for variant_id in reversed(range(len(client.exploit_variants))):
-                        targets.append(f"{method_name}-{variant_id}")
-                elif method_name == "test":
-                    for variant_id in reversed(range(client.test_variants)):
-                        targets.append(f"{method_name}-{variant_id}")
+                if method_name in variant_counts:
+                    targets.extend(
+                        f"{method_name}-{variant_id}"
+                        for variant_id in reversed(range(variant_counts[method_name]))
+                    )
                 elif method_name == "all":
                     targets.append("exploit")
                     targets.append("havoc")
@@ -593,21 +605,16 @@ async def run_chain(
                     repeat_seq += 1
                 repeat_id = repeat_seq
 
-            if method_name == "getflag":
-                if auto and ("putflag", variant_id, repeat_id) not in seen:
-                    targets.append(f"putflag-{variant_id}-{repeat_id}")
-                    continue
-            elif method_name == "getnoise":
-                if auto and ("putnoise", variant_id, repeat_id) not in seen:
-                    targets.append(f"putnoise-{variant_id}")
-                    continue
-            elif method_name == "exploit":
-                flag_variant = client.exploit_variants[variant_id]
-                if auto and ("putflag", flag_variant, repeat_id) not in seen:
-                    targets.append(f"putflag-{flag_variant}-{repeat_id}")
-                    continue
-            elif method_name not in TASK_TYPES:
+            if method_name not in TASK_TYPES:
                 raise ValueError(f"Unknown method {method_name}")
+            put = PREDECESSOR.get(method_name)
+            if auto and put is not None:
+                put_variant = client.flag_variant(
+                    CheckerMethod(method_name), variant_id
+                )
+                if (put, put_variant, repeat_id) not in seen:
+                    targets.append(f"{put}-{put_variant}-{repeat_id}")
+                    continue
             seen.add((method_name, variant_id, repeat_id))
             print(
                 f"\x1b[31;1mcall\x1b[0m:         {method_name}-{variant_id}-{repeat_id}"

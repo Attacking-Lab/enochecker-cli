@@ -51,7 +51,7 @@ def test_draws_respect_dependencies_horizon_and_concurrency():
         plan.scheduler.instance.assert_valid(starts)
         slots = plan.draw()
         for key, start in slots.items():
-            assert 0 <= start and start + task_budget_s(eno) <= plan.m
+            assert 0 <= start and start + task_budget_s(eno.timeout) <= plan.m
             if key.method in (CheckerMethod.GETFLAG, CheckerMethod.GETNOISE):
                 if key.related_round_offset == 0:
                     head = (
@@ -64,7 +64,7 @@ def test_draws_respect_dependencies_horizon_and_concurrency():
                         for k, s in slots.items()
                         if k.method == head and k.variant_id == key.variant_id
                     )
-                    assert start - put >= task_budget_s(eno)
+                    assert start - put >= task_budget_s(eno.timeout)
 
 
 def test_infeasible_round_reports_minimum_length():
