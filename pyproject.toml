@@ -7,7 +7,7 @@ authors = [
 	{ name = "Tobias Holl", email = "tobias@tholl.xyz" },
 	{ name = "Benedikt Radtke", email = "benediktradtke@gmail.com" }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 dependencies = [
 	"docker>=7.1.0",
 	"dotenv>=0.9.9",
@@ -80,4 +80,4 @@ ignore_missing_imports = true
 default-groups = ["prod"]
 
 [tool.uv.sources]
-enochecker-core = { git = "https://git.atklab.cloud/atklab/enochecker-core", rev = "v0.18.2", group = "prod" }
+enochecker-core = { git = "https://git.atklab.cloud/atklab/enochecker-core", rev = "v0.21.1" }
