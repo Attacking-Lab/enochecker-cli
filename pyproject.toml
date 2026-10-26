@@ -7,11 +7,12 @@ authors = [
 	{ name = "Tobias Holl", email = "tobias@tholl.xyz" },
 	{ name = "Benedikt Radtke", email = "benediktradtke@gmail.com" }
 ]
+license = "MIT"
 requires-python = ">=3.10,<3.14"
 dependencies = [
 	"docker>=7.1.0",
 	"dotenv>=0.9.9",
-	"exrex>=0.12.0",
+	"rstr>=3.2.2",
 	"httpx>=0.28.1",
 	"requests>=2.20",
 	"rich>=14.1.0",
@@ -72,12 +73,9 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unreachable = true
 
-[[tool.mypy.overrides]]
-module = "exrex"
-ignore_missing_imports = true
 
 [tool.uv]
 default-groups = ["prod"]
 
 [tool.uv.sources]
-enochecker-core = { git = "https://git.atklab.cloud/atklab/enochecker-core", rev = "v0.21.1" }
+enochecker-core = { git = "https://github.com/attacking-lab/enochecker-core", rev = "v0.22.0" }

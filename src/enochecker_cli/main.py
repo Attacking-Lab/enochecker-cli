@@ -16,7 +16,7 @@ import os
 
 from dotenv import load_dotenv
 from random import Random, SystemRandom
-import exrex
+import rstr
 import requests
 import httpx
 from rich.progress import Progress, ProgressColumn, Task, TextColumn
@@ -359,7 +359,7 @@ class CheckerClient:
         flag: str | None = None
         attack_info: str | None = None
         if method == CheckerMethod.PUTFLAG:
-            flag = exrex.getone(self.flag_regex, limit=64)
+            flag = rstr.xeger(self.flag_regex)
             # Stored before the request: the gameserver checks a flag whether
             # or not its PUTFLAG succeeded.
             self._flags[flag_key] = (flag, None)

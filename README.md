@@ -1,4 +1,4 @@
-# Enochecker CLI [![PyPI version](https://badge.fury.io/py/enochecker-cli.svg)](https://pypi.org/project/enochecker-cli) [![Build Status](https://github.com/enowars/enochecker_cli/actions/workflows/pythonapp.yml/badge.svg?branch=main)](https://github.com/enowars/enochecker_cli/actions/workflows/pythonapp.yml) ![Lines of code](https://tokei.rs/b1/github/enowars/enochecker_cli)
+# Enochecker CLI
 
 
 ## Usage
@@ -125,8 +125,7 @@ options:
   -s, --seed SEED       seed for task ids and schedules
 ```
 
-`sim` replays the load
-[atklab/gameserver](https://git.dev.sinitax.com/atklab/gameserver)'s eno
+`sim` replays the load atklab/gameserver's eno
 runner puts on a checker. Each round, every team gets its own draw from the
 gameserver's flat star scheduler (vendored into `enochecker_cli.scheduler`),
 built from the same task set the gameserver dispatches: per flag variant a
@@ -141,4 +140,4 @@ fatal, so `--statistics` shows how the checker degrades under load.
 
 ## Installation
 
-`pip3 install git+ssh://git@github.com/attacking-lab/enochecker-cli`
+`pip install git+https://github.com/attacking-lab/enochecker-cli`

@@ -1,0 +1,71 @@
+enochecker-cli
+Copyright (c) 2025 Attacking-Lab
+Copyright (c) 2019 ENOWARS contributors
+
+This project includes the following third-party software.
+
+--------------------------------------------------------------------------------
+docker (Apache-2.0)
+https://github.com/docker/docker-py
+Copyright 2016 Docker, Inc.
+
+Licensed under the Apache License, Version 2.0. You may obtain a copy at
+https://www.apache.org/licenses/LICENSE-2.0
+
+--------------------------------------------------------------------------------
+python-dotenv (BSD-3-Clause)
+https://github.com/theskumar/python-dotenv
+Copyright (c) 2014 Saurabh Kumar
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted under the BSD 3-Clause License.
+
+--------------------------------------------------------------------------------
+rstr (MIT)
+https://github.com/leapfrogonline/rstr
+Copyright (c) 2012 Leapfrog Online
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software.
+
+--------------------------------------------------------------------------------
+httpx (BSD-3-Clause)
+https://github.com/encode/httpx
+Copyright (c) 2019 Tom Christie
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted under the BSD 3-Clause License.
+
+--------------------------------------------------------------------------------
+requests (Apache-2.0)
+https://github.com/psf/requests
+Copyright 2019 Kenneth Reitz
+
+Licensed under the Apache License, Version 2.0. You may obtain a copy at
+https://www.apache.org/licenses/LICENSE-2.0
+
+--------------------------------------------------------------------------------
+rich (MIT)
+https://github.com/Textualize/rich
+Copyright (c) 2020 Will McGugan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software.
+
+--------------------------------------------------------------------------------
+enochecker-core (MIT)
+https://github.com/attacking-lab/enochecker-core
+Copyright (c) 2025 Attacking-Lab
+Copyright (c) 2019 ENOWARS contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software.

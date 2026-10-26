@@ -193,10 +193,10 @@ default-groups = ["prod"]
 dependencies = [
     { name = "docker" },
     { name = "dotenv" },
-    { name = "exrex" },
     { name = "httpx" },
     { name = "requests" },
     { name = "rich" },
+    { name = "rstr" },
 ]
 
 [package.dev-dependencies]
@@ -228,10 +228,10 @@ typing = [
 requires-dist = [
     { name = "docker", specifier = ">=7.1.0" },
     { name = "dotenv", specifier = ">=0.9.9" },
-    { name = "exrex", specifier = ">=0.12.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "requests", specifier = ">=2.20" },
     { name = "rich", specifier = ">=14.1.0" },
+    { name = "rstr", specifier = ">=3.2.2" },
 ]
 
 [package.metadata.requires-dev]
@@ -242,7 +242,7 @@ dev = [
 ]
 format = [{ name = "ruff", specifier = ">=0.12.9" }]
 lint = [{ name = "ruff", specifier = ">=0.12.9" }]
-prod = [{ name = "enochecker-core", git = "https://git.atklab.cloud/atklab/enochecker-core?rev=v0.21.1" }]
+prod = [{ name = "enochecker-core", git = "https://github.com/attacking-lab/enochecker-core?rev=v0.22.0" }]
 test = [
     { name = "coverage", specifier = ">=7.10.4" },
     { name = "pytest", specifier = ">=8.4.1" },
@@ -255,8 +255,8 @@ typing = [
 
 [[package]]
 name = "enochecker-core"
-version = "0.21.1"
-source = { git = "https://git.atklab.cloud/atklab/enochecker-core?rev=v0.21.1#e69470e7ea81fda9e41a4158b4a9e4908b716710" }
+version = "0.22.0"
+source = { git = "https://github.com/attacking-lab/enochecker-core?rev=v0.22.0#4770a14c4b89ab11d916cf3513ef1ca72395806f" }
 dependencies = [
     { name = "pydantic" },
 ]
@@ -271,15 +271,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8a/0e/97c33bf5009bdbac74fd2beace167cab3f978feb69cc36f1ef79360d6c4e/exceptiongroup-1.3.1-py3-none-any.whl", hash = "sha256:a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598", size = 16740, upload-time = "2025-11-21T23:01:53.443Z" },
-]
-
-[[package]]
-name = "exrex"
-version = "0.12.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/26/9a/580635ea99178aba728de721e88e5a0d18b528805c58e8b26eab87be2a45/exrex-0.12.0.tar.gz", hash = "sha256:3f582add0700d4141e279625252e7a0655f9ad81feab3b8ab9077966668a2c99", size = 19766, upload-time = "2024-11-13T13:46:36.399Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/63/90/89fdfc6f426cc6414cc8e1c599c4333d800f8f3ff05cb6ce69c8d0eaa245/exrex-0.12.0-py3-none-any.whl", hash = "sha256:1228f2e3afb008cacf6adc3ec20b098f1303886f4382b57cdf3b7259fb7c0ad3", size = 23590, upload-time = "2024-11-13T13:46:34.647Z" },
 ]
 
 [[package]]
@@ -616,6 +607,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fe/75/af448d8e52bf1d8fa6a9d089ca6c07ff4453d86c65c145d0a300bb073b9b/rich-14.1.0.tar.gz", hash = "sha256:e497a48b844b0320d45007cdebfeaeed8db2a4f4bcf49f15e455cfc4af11eaa8", size = 224441, upload-time = "2025-07-25T07:32:58.125Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e3/30/3c4d035596d3cf444529e0b2953ad0466f6049528a879d27534700580395/rich-14.1.0-py3-none-any.whl", hash = "sha256:536f5f1785986d6dbdea3c75205c473f970777b4a0d6c6dd1b696aa05a3fa04f", size = 243368, upload-time = "2025-07-25T07:32:56.73Z" },
+]
+
+[[package]]
+name = "rstr"
+version = "3.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/80/d7449656d45a776b7a443ce3af4eb97c4debe416a1a80f60311c7cfd02ff/rstr-3.2.2.tar.gz", hash = "sha256:c4a564d4dfb4472d931d145c43d1cf1ad78c24592142e7755b8866179eeac012", size = 13560, upload-time = "2023-10-11T20:07:57.422Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c8/8c/a0f14f2fcdd846839c478048032b2fc93293deaa936ff6751f27dcf50995/rstr-3.2.2-py3-none-any.whl", hash = "sha256:f39195d38da1748331eeec52f1276e71eb6295e7949beea91a5e9af2340d7b3b", size = 10030, upload-time = "2023-10-11T20:07:55.873Z" },
 ]
 
 [[package]]

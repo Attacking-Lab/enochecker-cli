@@ -16,20 +16,14 @@
 # below picks up a freshly rebuilt `:latest` instead of a stale cached
 # copy on runs where ci-image.yml did rebuild it.
 #
-# enochecker-core is a private git dependency (see pyproject.toml's
-# [tool.uv.sources], pinned at git.atklab.cloud/atklab/enochecker-core),
-# so every step needs the CHECKER_PULL_TOKEN secret, passed through
-# git-pass-helper (baked into the CI image) to authenticate `uv`'s
-# fetch -- the same "-u oauth2" pattern atklab/gameserver's justfile/
-# Dockerfile use for its own ENOCHECKER_TOKEN. format/lint/mypy/test
-# have no dependencies on each other, so Woodpecker runs them
-# concurrently via its depends_on DAG mode, each doing its own `uv sync`
-# under the hood -- UV_CACHE_DIR/UV_PYTHON_INSTALL_DIR below point into
-# the workspace volume Woodpecker shares across a pipeline's steps, so
-# the four steps split the download cost of enochecker-core and friends
-# instead of each paying it independently (mirrors atklab/enochecker3's
-# test.yml, though this image already bakes in Python so
-# UV_PYTHON_INSTALL_DIR mostly future-proofs against that changing).
+# enochecker-core is a public GitHub dependency (attacking-lab/enochecker-core),
+# so no token is needed for `uv`'s fetch.
+# format/lint/mypy/test have no dependencies on each other, so Woodpecker
+# runs them concurrently via its depends_on DAG mode, each doing its own
+# `uv sync` under the hood -- UV_CACHE_DIR/UV_PYTHON_INSTALL_DIR below
+# point into the workspace volume Woodpecker shares across a pipeline's
+# steps, so the four steps split the download cost of enochecker-core and
+# friends instead of each paying it independently.
 # `--no-config` replaces the deprecated `--isolated` in UV_FLAGS.
 
 variables:
@@ -38,8 +32,6 @@ variables:
     UV_FLAGS: "--exact --no-config --frozen"
     UV_CACHE_DIR: /woodpecker/.uv-cache
     UV_PYTHON_INSTALL_DIR: /woodpecker/.uv-python
-    CHECKER_PULL_TOKEN:
-      from_secret: CHECKER_PULL_TOKEN
 
 when:
   - event: [push, pull_request, manual, tag]
@@ -54,25 +46,25 @@ steps:
     pull: true
     environment: *env
     commands:
-      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v format
+      - just -v format
 
   - name: lint
     image: *ci_image
     pull: true
     environment: *env
     commands:
-      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v lint
+      - just -v lint
 
   - name: mypy
     image: *ci_image
     pull: true
     environment: *env
     commands:
-      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v mypy
+      - just -v mypy
 
   - name: test
     image: *ci_image
     pull: true
     environment: *env
     commands:
-      - git-pass -u oauth2 -p "$CHECKER_PULL_TOKEN" -U https://git.atklab.cloud -- just -v test
+      - just -v test
