@@ -1,6 +1,6 @@
 # Enochecker CLI
 
-A CLI for driving ENOWARS-style A/D CTF checker scripts. It can dispatch single checker tasks (`raw`), run full put/get task chains (`run`), or simulate realistic round-based gameserver load against a checker (`sim`).
+A CLI for driving A/D CTF checker scripts. It can dispatch single checker tasks (`raw`), run full put/get task chains (`run`), or simulate realistic round-based gameserver load against a checker (`sim`).
 
 ## Usage
 
