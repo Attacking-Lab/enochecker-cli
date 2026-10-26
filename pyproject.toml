@@ -27,8 +27,8 @@ classifiers = [
 ]
 
 [project.urls]
-repository = "https://github.com/attacking-lab/enochecker_cli"
-homepage = "https://github.com/attacking-lab/enochecker_cli"
+repository = "https://github.com/attacking-lab/enochecker-cli"
+homepage = "https://github.com/attacking-lab/enochecker-cli"
 
 [project.scripts]
 enochecker_cli = "enochecker_cli.main:main"
