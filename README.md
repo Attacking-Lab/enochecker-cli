@@ -1,5 +1,6 @@
 # Enochecker CLI
 
+A CLI for driving ENOWARS-style A/D CTF checker scripts. It can dispatch single checker tasks (`raw`), run full put/get task chains (`run`), or simulate realistic round-based gameserver load against a checker (`sim`).
 
 ## Usage
 
@@ -125,19 +126,3 @@ options:
   -s, --seed SEED       seed for task ids and schedules
 ```
 
-`sim` replays the load atklab/gameserver's eno
-runner puts on a checker. Each round, every team gets its own draw from the
-gameserver's flat star scheduler (vendored into `enochecker_cli.scheduler`),
-built from the same task set the gameserver dispatches: per flag variant a
-putflag, its getflag, and one getflag for each of the last
-`--check-past-rounds` rounds; per noise variant a putnoise and its getnoise;
-per havoc variant a havoc. Tasks run within the first `--round-time` minus
-`--checker-hold` seconds. Each getflag/getnoise starts at least `--timeout`
-+ 1 seconds after its put, and no team has more than `C` tasks in flight.
-The run fails up front with the minimum feasible round length if the task
-set does not fit the round. Failed and timed-out tasks are recorded, not
-fatal, so `--statistics` shows how the checker degrades under load.
-
-## Installation
-
-`pip install git+https://github.com/attacking-lab/enochecker-cli`
